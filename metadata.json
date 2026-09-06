@@ -1,0 +1,6 @@
+{
+  "name": "Risk2Data Intelligence Platform",
+  "description": "Structured security intelligence and OSINT database for tactical analysis.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
