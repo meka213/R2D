@@ -136,7 +136,7 @@ function adaptRecord(raw: any): RiskRecord {
     id,
     title: raw.name || raw.title || "UNKNOWN",
     entity_type: raw.entity_type || "Unknown",
-    regions: ["West"], // Normalized for the current Western Libya dataset
+    regions: Array.isArray(raw.regions) ? raw.regions : (raw.region ? [raw.region] : []),
     tags: Array.isArray(raw.tags) ? raw.tags : [],
     affiliations: Array.isArray(raw.allies) ? raw.allies : [],
     rivalries: Array.isArray(raw.rivalries) ? raw.rivalries : [],
@@ -175,6 +175,14 @@ function getQueryId(id: string) {
  * ============================================================
  */
 
+function detectPrecision(dateStr: string): 'exact' | 'month' | 'year' | 'approximate' {
+  if (!dateStr) return 'year';
+  const parts = dateStr.split('-');
+  if (parts.length === 3) return 'exact';
+  if (parts.length === 2) return 'month';
+  return 'year';
+}
+
 /**
  * Generates or refreshes automatic timeline nodes for a given entity.
  * This does NOT delete manual nodes.
@@ -197,13 +205,12 @@ async function refreshEntityTimeline(recordId: string) {
 
   const autoNodes: Omit<TimelineMilestone, "id">[] = [];
 
-  // 1. Birth/Formation - Only if explicit dated fields exist
-  // For Person: dob
-  if (record.entity_type.toLowerCase().includes('person') && record.dob) {
+  // 1. Birth - Explicit DOB
+  if (record.dob) {
     autoNodes.push({
       entity_id: record.id,
       date: record.dob,
-      date_precision: record.date_precision || (record.dob.length === 4 ? 'year' : 'exact'),
+      date_precision: detectPrecision(record.dob),
       title: `Birth: ${record.title}`,
       event_type: 'Birth',
       description: `Documented birth for ${record.title}.`,
@@ -223,16 +230,16 @@ async function refreshEntityTimeline(recordId: string) {
     });
   }
 
-  // For Organization/Group: start_date
-  const isOrg = ['Armed Group', 'Brigade', 'Militia', 'Security Actor', 'militia', 'armed_group'].some(t => record.entity_type.toLowerCase().includes(t.toLowerCase()));
-  if (isOrg && record.start_date) {
+  // 2. Formation/Establishment - Explicit start_date
+  if (record.start_date) {
+    const isPerson = record.entity_type.toLowerCase().includes('person');
     autoNodes.push({
       entity_id: record.id,
       date: record.start_date,
-      date_precision: record.date_precision || (record.start_date.length === 4 ? 'year' : 'exact'),
-      title: `Formation: ${record.title}`,
-      event_type: 'Establishment',
-      description: `Documented formation of ${record.title}.`,
+      date_precision: detectPrecision(record.start_date),
+      title: isPerson ? `Career Start: ${record.title}` : `Formation: ${record.title}`,
+      event_type: isPerson ? 'Activation' : 'Establishment',
+      description: isPerson ? `Initial documented activity for ${record.title}.` : `Documented formation of ${record.title}.`,
       location: record.location,
       regions: record.regions,
       coordinates: record.coordinates,
@@ -249,19 +256,24 @@ async function refreshEntityTimeline(recordId: string) {
     });
   }
 
-  // 2. End date / Dissolution - Only if explicit end_date exists
+  // 3. Death/Dissolution - Explicit end_date
   if (record.end_date) {
+    const isPerson = record.entity_type.toLowerCase().includes('person');
     autoNodes.push({
       entity_id: record.id,
       date: record.end_date,
-      date_precision: 'exact',
-      title: record.entity_type.toLowerCase().includes('person') ? `Death: ${record.title}` : `Dissolution: ${record.title}`,
-      event_type: record.entity_type.toLowerCase().includes('person') ? 'Death' : 'Dissolution',
-      description: `Documented end of activity for ${record.title}.`,
+      date_precision: detectPrecision(record.end_date),
+      title: isPerson ? `Death: ${record.title}` : `Dissolution: ${record.title}`,
+      event_type: isPerson ? 'Death' : 'Dissolution',
+      description: isPerson ? `Documented death for ${record.title}.` : `Documented dissolution of ${record.title}.`,
       location: record.location,
       regions: record.regions,
+      coordinates: record.coordinates,
       source_record_id: record.id,
       source_record_type: record.entity_type,
+      source: record.source,
+      source_date: record.source_date,
+      confidence: record.confidence,
       origin: 'auto',
       is_major: true,
       visible: true,
@@ -317,13 +329,30 @@ async function getAuthorizedTimeline(clientId: string, entityId: string): Promis
 
     // Strict cross-check for related records provenance
     if (node.source_record_id && node.source_record_id !== record.id) {
-      const sourceRegions = node.regions || ["West"]; 
-      const sourceType = node.source_record_type;
-      
-      const hasSourceRegion = sourceRegions.some(r => client.allowed_regions.includes(r));
-      const hasSourceType = !sourceType || client.allowed_types.includes(sourceType);
-      
-      if (!hasSourceRegion || !hasSourceType) {
+      let sourceRegions = node.regions;
+      let sourceType = node.source_record_type;
+
+      if (!sourceRegions || sourceRegions.length === 0) {
+        // Resolve from source record
+        const rawSource = await profilesCollection.findOne(getQueryId(node.source_record_id));
+        if (rawSource) {
+          const sourceRecord = adaptRecord(rawSource);
+          sourceRegions = sourceRecord.regions;
+          sourceType = sourceRecord.entity_type;
+        } else {
+          // If source not found and node has no regions, fail closed
+          sourceAuthorized = false;
+        }
+      }
+
+      if (sourceAuthorized && sourceRegions) {
+        const hasSourceRegion = sourceRegions.some(r => client.allowed_regions.includes(r));
+        const hasSourceType = !sourceType || client.allowed_types.includes(sourceType);
+        
+        if (!hasSourceRegion || !hasSourceType) {
+          sourceAuthorized = false;
+        }
+      } else {
         sourceAuthorized = false;
       }
     }
@@ -664,15 +693,41 @@ async function startServer() {
         return res.status(400).json({ error: "Missing required fields (date, title, event_type, description)" });
       }
 
+      // Whitelist only supported fields
+      const whitelisted: Partial<TimelineMilestone> = {};
+      const fields = [
+        'date', 'date_precision', 'title', 'event_type', 'description', 
+        'location', 'regions', 'coordinates', 'source_record_id', 
+        'source_record_type', 'source', 'source_date', 'confidence', 
+        'stage', 'is_major', 'visible'
+      ];
+
+      for (const field of fields) {
+        if (nodeData[field] !== undefined) {
+          // Type validations
+          if (field === 'regions' && !Array.isArray(nodeData[field])) continue;
+          if ((field === 'is_major' || field === 'visible') && typeof nodeData[field] !== 'boolean') continue;
+          if (field === 'coordinates' && (typeof nodeData[field] !== 'object' || nodeData[field] === null)) continue;
+          
+          (whitelisted as any)[field] = nodeData[field];
+        }
+      }
+
       const newNode: TimelineMilestone = {
-        ...nodeData,
+        ...whitelisted,
         id: `TL-MAN-${Date.now()}`,
         entity_id: id,
         origin: 'manual',
-        visible: nodeData.visible !== false,
+        date: whitelisted.date!,
+        title: whitelisted.title!,
+        event_type: whitelisted.event_type!,
+        description: whitelisted.description!,
+        regions: whitelisted.regions || [],
+        is_major: whitelisted.is_major || false,
+        visible: whitelisted.visible !== false,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
-      };
+      } as TimelineMilestone;
 
       await timelineCollection.insertOne(newNode);
 
@@ -682,7 +737,7 @@ async function startServer() {
         client_id: "ADMIN",
         client_name: "ADMINISTRATOR",
         action: `Manual Timeline Node Added: ${id}`,
-        regions: [],
+        regions: whitelisted.regions || [],
         timestamp: new Date().toISOString()
       });
 

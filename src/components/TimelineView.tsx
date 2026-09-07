@@ -249,7 +249,6 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
       `R2D RECORDED CHRONOLOGY DOSSIER\n` +
       `ENTITY: ${record.title} [${record.id}] — TYPE: ${record.entity_type}\n` +
       `REGION(S): ${(record.regions || []).join(', ')}\n` +
-      `CLASSIFICATION: RESTRICTED\n` +
       `GENERATED AT: ${new Date().toISOString()}\n` +
       `============================================================\n\n`;
 
@@ -261,12 +260,6 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
         if (m.stage) text += `Stage: ${m.stage.toUpperCase()}\n`;
         text += `Summary: ${m.description}\n`;
         if (m.source) text += `Source: ${m.source} (${m.source_date || 'N/A'}) [Confidence: ${m.confidence || 'Not specified'}]\n`;
-        if (m.related_entities && m.related_entities.length > 0) {
-          text += `Related Entities: ${m.related_entities.join(', ')}\n`;
-        }
-        if (m.related_record_id || m.record_id) {
-          text += `Record ID: ${m.related_record_id || m.record_id}\n`;
-        }
         return text;
       })
       .join('\n------------------------------------------------------------\n\n');
@@ -286,9 +279,9 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
       `ENTITY TYPE: ${record.entity_type}\n` +
       `REGIONAL THEATER: ${(record.regions || []).join(', ')}\n` +
       `OPERATIONAL BASE: ${record.location || 'Libya'}\n` +
-      `START / INCEPTION: ${record.dob || record.start_date || 'Documented'}\n` +
-      `CURRENT STATUS: ${record.is_ongoing === true ? 'ACTIVE / ONGOING' : (record.is_ongoing === false ? 'RESOLVED' : 'Not specified')}\n` +
-      `CONFIDENCE LEVEL: ${record.confidence || 'Not specified'}\n\n` +
+      (record.dob || record.start_date ? `START / INCEPTION: ${record.dob || record.start_date}\n` : '') +
+      (record.is_ongoing === true ? `CURRENT STATUS: ACTIVE\n` : (record.is_ongoing === false ? `CURRENT STATUS: RESOLVED\n` : '')) +
+      (record.confidence ? `CONFIDENCE LEVEL: ${record.confidence}\n\n` : '\n') +
       `EXECUTIVE ASSESSMENT:\n` +
       `${record.summary}\n\n` +
       `AFFILIATIONS: ${(record.affiliations || []).join(', ') || 'None recorded'}\n` +
@@ -300,7 +293,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
         .map(m => `• [${m.date}] (${m.event_type}) ${m.title} — ${m.location || ''}\n  ${m.description}`)
         .join('\n\n') +
       `\n\n============================================================\n` +
-      `END OF REPORT — RESTRICTED INFORMATION\n`;
+      `END OF REPORT\n`;
 
     navigator.clipboard.writeText(reportText);
     setReportCopied(true);
@@ -903,7 +896,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
                     Operational Intelligence Dossier Report
                   </h3>
                   <span className="text-[10px] font-mono text-[#8f9bad]">
-                    REF: {record.id} — RESTRICTED OUTPUT
+                    REF: {record.id}
                   </span>
                 </div>
               </div>
