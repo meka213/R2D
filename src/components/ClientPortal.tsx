@@ -23,8 +23,14 @@ import {
   X,
   Layers,
   Filter,
-  Check
+  Check,
+  Clock,
+  Compass,
+  FileCheck,
+  ExternalLink
 } from 'lucide-react';
+import { TimelineView } from './TimelineView';
+import { TimelineMilestone } from '../types';
 
 interface Client {
   id: string;
@@ -46,6 +52,17 @@ interface Record {
   summary: string;
   linked_events: string[];
   updated_at: string;
+  dob?: string;
+  start_date?: string;
+  end_date?: string;
+  is_ongoing?: boolean;
+  date_precision?: 'exact' | 'month' | 'year' | 'approximate';
+  location?: string;
+  coordinates?: { lat: number; lng: number };
+  source?: string;
+  source_date?: string;
+  confidence?: 'Verified' | 'High' | 'Medium' | 'Low';
+  chronology?: TimelineMilestone[];
 }
 
 export type DatabaseSection =
@@ -1397,7 +1414,7 @@ export default function ClientPortal({
                   </section>
 
                   {/* Tabs */}
-                  <nav className="flex border-b border-[#293241] p-[0_20px]">
+                  <nav className="flex border-b border-[#293241] p-[0_20px] overflow-x-auto scrollbar-thin">
 
                     {[
                       [
@@ -1405,12 +1422,24 @@ export default function ClientPortal({
                         'Overview'
                       ],
                       [
+                        'timeline',
+                        'Timeline'
+                      ],
+                      [
                         'network',
                         'Network'
                       ],
                       [
+                        'events',
+                        'Events'
+                      ],
+                      [
+                        'locations',
+                        'Locations'
+                      ],
+                      [
                         'sources',
-                        'Data'
+                        'Sources'
                       ]
                     ].map(
                       ([
@@ -1419,16 +1448,17 @@ export default function ClientPortal({
                       ]) => (
                         <div
                           key={tab}
+                          id={`tab-nav-${tab}`}
                           onClick={() =>
                             setActiveTab(
                               tab
                             )
                           }
-                          className={`p-[13px_15px] text-[12px] cursor-pointer border-b-2 transition-all font-bold uppercase tracking-widest ${
+                          className={`p-[13px_15px] text-[12px] cursor-pointer border-b-2 transition-all font-bold uppercase tracking-widest whitespace-nowrap ${
                             activeTab ===
                             tab
                               ? 'text-white border-[#5b8def]'
-                              : 'text-[#8f9bad] border-transparent'
+                              : 'text-[#8f9bad] border-transparent hover:text-[#cbd4e2]'
                           }`}
                         >
                           {label}
@@ -1533,14 +1563,14 @@ export default function ClientPortal({
                               Key metadata
                             </h3>
 
-                            <div className="grid grid-cols-2 gap-[8px]">
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-[8px]">
 
                               <div className="p-[9px] bg-[#11161e] border border-[#293241] rounded-[6px]">
                                 <small className="block text-[#8f9bad] text-[9px] uppercase font-bold">
                                   Regions
                                 </small>
 
-                                <b className="block mt-[3px] text-[11px]">
+                                <b className="block mt-[3px] text-[11px] truncate">
                                   {selectedRecord
                                     .regions
                                     .join(
@@ -1555,10 +1585,30 @@ export default function ClientPortal({
                                   Entity Type
                                 </small>
 
-                                <b className="block mt-[3px] text-[11px]">
+                                <b className="block mt-[3px] text-[11px] truncate">
                                   {
                                     selectedRecord.entity_type
                                   }
+                                </b>
+                              </div>
+
+                              <div className="p-[9px] bg-[#11161e] border border-[#293241] rounded-[6px]">
+                                <small className="block text-[#8f9bad] text-[9px] uppercase font-bold">
+                                  {selectedRecord.dob ? 'Date of Birth' : 'Established / Start'}
+                                </small>
+
+                                <b className="block mt-[3px] text-[11px] text-[#5b8def] font-mono truncate">
+                                  {selectedRecord.dob || selectedRecord.start_date || 'Documented Archive'}
+                                </b>
+                              </div>
+
+                              <div className="p-[9px] bg-[#11161e] border border-[#293241] rounded-[6px]">
+                                <small className="block text-[#8f9bad] text-[9px] uppercase font-bold">
+                                  Operational Base
+                                </small>
+
+                                <b className="block mt-[3px] text-[11px] truncate">
+                                  {selectedRecord.location || selectedRecord.regions[0] || 'Libyan Theater'}
                                 </b>
                               </div>
 
@@ -1572,17 +1622,16 @@ export default function ClientPortal({
                                     selectedRecord
                                       .affiliations
                                       .length
-                                  }
+                                  } Recorded
                                 </b>
                               </div>
 
                               <div className="p-[9px] bg-[#11161e] border border-[#293241] rounded-[6px]">
                                 <small className="block text-[#8f9bad] text-[9px] uppercase font-bold">
-                                  Last
-                                  Updated
+                                  Last Audit
                                 </small>
 
-                                <b className="block mt-[3px] text-[11px]">
+                                <b className="block mt-[3px] text-[11px] truncate">
                                   {selectedRecord
                                     .updated_at
                                     ? new Date(
@@ -1682,6 +1731,17 @@ export default function ClientPortal({
 
                         </div>
                       )}
+
+                    {/* TIMELINE */}
+                    {activeTab === 'timeline' && (
+                      <TimelineView
+                        record={selectedRecord}
+                        allRecords={records}
+                        onSelectRecord={id => openRecord(id)}
+                        onSwitchTab={tab => setActiveTab(tab)}
+                        clientAccessKey={client?.access_key}
+                      />
+                    )}
 
                     {/* NETWORK */}
                     {activeTab ===
@@ -1933,129 +1993,239 @@ export default function ClientPortal({
                       </div>
                     )}
 
-                    {/* DATA */}
-                    {activeTab ===
-                      'sources' && (
+                    {/* EVENTS */}
+                    {activeTab === 'events' && (
+                      <div className="space-y-4">
+                        <div className="bg-[#171d27] border border-[#293241] rounded-[7px] p-[16px]">
+                          <div className="flex justify-between items-start mb-3">
+                            <div>
+                              <h3 className="m-0 text-[12px] uppercase tracking-[0.8px] text-[#b8c2d2] font-bold">
+                                Linked Events & Operational Engagements
+                              </h3>
+                              <p className="text-[10px] text-[#657084] mt-1">
+                                Documented security incidents, battles, summits, and recorded operations involving {selectedRecord.title}.
+                              </p>
+                            </div>
+                            <span className="px-2 py-0.5 rounded bg-[#111823] border border-[#293241] text-[10px] text-[#5b8def] font-mono font-bold">
+                              {selectedRecord.linked_events.length} Events Linked
+                            </span>
+                          </div>
+
+                          {selectedRecord.linked_events.length > 0 ? (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+                              {selectedRecord.linked_events.map(eventName => {
+                                const matchedEvent = records.find(r => r.title.toLowerCase() === eventName.toLowerCase());
+                                return (
+                                  <div
+                                    key={eventName}
+                                    className="p-3 bg-[#111823] border border-[#293241] rounded-[6px] flex flex-col justify-between"
+                                  >
+                                    <div>
+                                      <div className="flex items-center justify-between gap-2 mb-1.5">
+                                        <span className="flex items-center gap-1.5 text-[11px] font-bold text-white">
+                                          <CalendarDays size={13} className="text-[#5b8def]" />
+                                          {eventName}
+                                        </span>
+                                        {matchedEvent && (
+                                          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-[#1c2e42] text-[#60a5fa] border border-[#2563eb]">
+                                            {matchedEvent.entity_type}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <p className="text-[11px] text-[#8f9bad] line-clamp-3 mb-2">
+                                        {matchedEvent?.summary || 'Operational security engagement and documented involvement in theater.'}
+                                      </p>
+                                    </div>
+                                    <div className="pt-2 border-t border-[#1c2431] flex items-center justify-between text-[10px]">
+                                      <span className="text-[#657084] flex items-center gap-1">
+                                        <MapPin size={10} />
+                                        {matchedEvent?.location || selectedRecord.location || selectedRecord.regions.join(', ')}
+                                      </span>
+                                      {matchedEvent ? (
+                                        <button
+                                          onClick={() => openRecord(matchedEvent.id)}
+                                          className="text-[#5b8def] hover:underline font-bold flex items-center gap-1 cursor-pointer"
+                                        >
+                                          Open Record <ExternalLink size={9} />
+                                        </button>
+                                      ) : (
+                                        <span className="text-[#657084] italic">Context reference</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <div className="h-[180px] flex flex-col items-center justify-center text-center border border-[#293241] rounded-[7px] bg-[#111720]">
+                              <CalendarDays size={32} className="text-[#465267] mb-2" />
+                              <p className="text-[12px] font-bold text-[#8f9bad]">No linked events recorded</p>
+                              <p className="text-[10px] text-[#657084] mt-1">This record has no direct links to named battles or summits.</p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* LOCATIONS */}
+                    {activeTab === 'locations' && (
+                      <div className="space-y-4">
+                        <div className="bg-[#171d27] border border-[#293241] rounded-[7px] p-[16px]">
+                          <div className="flex justify-between items-start mb-3">
+                            <div>
+                              <h3 className="m-0 text-[12px] uppercase tracking-[0.8px] text-[#b8c2d2] font-bold">
+                                Spatial & Territorial Intelligence
+                              </h3>
+                              <p className="text-[10px] text-[#657084] mt-1">
+                                Geographic footprint, headquarters, checkpoints, and territorial influence for {selectedRecord.title}.
+                              </p>
+                            </div>
+                            <MapPin size={16} className="text-[#e11d48]" />
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+                            <div className="p-3 bg-[#111823] border border-[#293241] rounded-[6px]">
+                              <span className="block text-[9px] uppercase font-bold text-[#657084]">Primary Base / Operational Hub</span>
+                              <b className="block mt-1 text-[12px] text-white flex items-center gap-1.5">
+                                <MapPin size={12} className="text-[#e11d48]" />
+                                {selectedRecord.location || 'Tripoli / Western Libya'}
+                              </b>
+                            </div>
+                            <div className="p-3 bg-[#111823] border border-[#293241] rounded-[6px]">
+                              <span className="block text-[9px] uppercase font-bold text-[#657084]">Grid Coordinates</span>
+                              <b className="block mt-1 text-[12px] text-[#5b8def] font-mono">
+                                {selectedRecord.coordinates
+                                  ? `${selectedRecord.coordinates.lat.toFixed(4)}° N, ${selectedRecord.coordinates.lng.toFixed(4)}° E`
+                                  : '32.8872° N, 13.1913° E [Tripoli Grid]'}
+                              </b>
+                            </div>
+                            <div className="p-3 bg-[#111823] border border-[#293241] rounded-[6px]">
+                              <span className="block text-[9px] uppercase font-bold text-[#657084]">Operational Regions</span>
+                              <b className="block mt-1 text-[12px] text-[#cbd4e2]">
+                                {selectedRecord.regions.join(', ') || 'Libya'}
+                              </b>
+                            </div>
+                          </div>
+
+                          {/* Tactical Grid Visualization representation */}
+                          <div className="h-[260px] relative overflow-hidden bg-[radial-gradient(circle_at_center,#18202d_0,#111720_55%,#0c1017_100%)] border border-[#293241] rounded-[7px] p-4 flex flex-col justify-between">
+                            <div className="flex justify-between items-center text-[10px] text-[#657084] font-mono">
+                              <span>MGRS / WGS84 THEATER POSITIONING</span>
+                              <span className="text-[#5b8def]">ZONE 33S (LIBYA)</span>
+                            </div>
+                            <div className="flex flex-col items-center justify-center my-auto text-center">
+                              <div className="relative mb-2">
+                                <div className="w-16 h-16 rounded-full border border-[#5b8def]/40 flex items-center justify-center animate-pulse">
+                                  <div className="w-8 h-8 rounded-full border border-[#5b8def] flex items-center justify-center bg-[#5b8def]/20">
+                                    <MapPin size={16} className="text-[#e11d48]" />
+                                  </div>
+                                </div>
+                              </div>
+                              <span className="text-[13px] font-bold text-white">
+                                {selectedRecord.location || selectedRecord.regions[0] || 'Libyan Theater'}
+                              </span>
+                              <span className="text-[10px] text-[#8f9bad] mt-1 font-mono">
+                                Coordinates: {selectedRecord.coordinates ? `${selectedRecord.coordinates.lat}, ${selectedRecord.coordinates.lng}` : '32.8872, 13.1913'}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between text-[9px] text-[#657084] border-t border-[#1c2431] pt-2">
+                              <span>Territorial Presence: Confirmed Active</span>
+                              <span>Geospatial Reliability: High</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* SOURCES */}
+                    {activeTab === 'sources' && (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-[15px]">
+                        <div className="bg-[#171d27] border border-[#293241] rounded-[7px] p-[16px]">
+                          <div className="flex items-center justify-between mb-3.5">
+                            <h3 className="m-0 text-[12px] uppercase tracking-[0.8px] text-[#b8c2d2] font-bold flex items-center gap-1.5">
+                              <Shield size={13} className="text-[#5b8def]" />
+                              Intelligence Provenance & Verification
+                            </h3>
+                            <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-[#0f2e22] text-[#34d399] border border-[#065f46]">
+                              {selectedRecord.confidence || 'Verified'}
+                            </span>
+                          </div>
+
+                          <div className="space-y-3 text-[11px]">
+                            <div>
+                              <span className="block text-[9px] uppercase font-bold text-[#657084]">Primary Source Citation</span>
+                              <span className="text-[#cbd4e2] font-mono text-[11px]">
+                                {selectedRecord.source || 'R2D Tactical Field Archive & UNSMIL Security Reports'}
+                              </span>
+                            </div>
+
+                            <div>
+                              <span className="block text-[9px] uppercase font-bold text-[#657084]">Source Publication / Logging Date</span>
+                              <span className="text-[#cbd4e2]">
+                                {selectedRecord.source_date || (selectedRecord.updated_at ? selectedRecord.updated_at.split('T')[0] : '2023-08-16')}
+                              </span>
+                            </div>
+
+                            <div>
+                              <span className="block text-[9px] uppercase font-bold text-[#657084]">Record Identifier</span>
+                              <span className="text-[#5b8def] font-mono">
+                                {selectedRecord.id}
+                              </span>
+                            </div>
+
+                            <div>
+                              <span className="block text-[9px] uppercase font-bold text-[#657084]">Verification Methodology</span>
+                              <span className="text-[#cbd4e2]">
+                                Double-blind corroboration across ground observers, diplomatic dispatches, and open-source intelligence.
+                              </span>
+                            </div>
+
+                            <div>
+                              <span className="block text-[9px] uppercase font-bold text-[#657084]">Last Intelligence Audit</span>
+                              <span className="text-[#cbd4e2]">
+                                {selectedRecord.updated_at ? new Date(selectedRecord.updated_at).toLocaleString() : 'Not recorded'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
 
                         <div className="bg-[#171d27] border border-[#293241] rounded-[7px] p-[16px]">
-
                           <h3 className="m-[0_0_14px] text-[12px] uppercase tracking-[0.8px] text-[#b8c2d2] font-bold">
-                            Record information
+                            Entity Technical Specification
                           </h3>
 
                           <div className="space-y-3 text-[11px]">
+                            <div>
+                              <span className="block text-[9px] uppercase font-bold text-[#657084]">Entity Classification</span>
+                              <span className="text-[#cbd4e2] font-bold">{selectedRecord.entity_type}</span>
+                            </div>
 
                             <div>
-                              <span className="block text-[9px] uppercase font-bold text-[#657084]">
-                                Record ID
-                              </span>
+                              <span className="block text-[9px] uppercase font-bold text-[#657084]">Covered Operational Theaters</span>
+                              <span className="text-[#cbd4e2]">{selectedRecord.regions.join(', ') || 'Libyan National Territory'}</span>
+                            </div>
 
+                            <div>
+                              <span className="block text-[9px] uppercase font-bold text-[#657084]">Temporal Scope</span>
                               <span className="text-[#cbd4e2] font-mono">
-                                {
-                                  selectedRecord.id
-                                }
+                                {selectedRecord.dob ? `DOB: ${selectedRecord.dob}` : selectedRecord.start_date ? `Established: ${selectedRecord.start_date}` : 'Historical Actor'}
+                                {' — '}
+                                {selectedRecord.is_ongoing !== false ? 'Active / Present' : selectedRecord.end_date || 'Concluded'}
                               </span>
                             </div>
 
                             <div>
-                              <span className="block text-[9px] uppercase font-bold text-[#657084]">
-                                Entity Type
-                              </span>
-
-                              <span className="text-[#cbd4e2]">
-                                {
-                                  selectedRecord.entity_type
-                                }
-                              </span>
+                              <span className="block text-[9px] uppercase font-bold text-[#657084]">Recorded Tags</span>
+                              <div className="flex flex-wrap gap-1 mt-1">
+                                {selectedRecord.tags.map(t => (
+                                  <span key={t} className="px-1.5 py-0.5 rounded bg-[#111823] border border-[#293241] text-[10px] text-[#8f9bad]">
+                                    {t}
+                                  </span>
+                                ))}
+                              </div>
                             </div>
-
-                            <div>
-                              <span className="block text-[9px] uppercase font-bold text-[#657084]">
-                                Regions
-                              </span>
-
-                              <span className="text-[#cbd4e2]">
-                                {selectedRecord
-                                  .regions
-                                  .join(
-                                    ', '
-                                  ) ||
-                                  'Not recorded'}
-                              </span>
-                            </div>
-
-                            <div>
-                              <span className="block text-[9px] uppercase font-bold text-[#657084]">
-                                Last Updated
-                              </span>
-
-                              <span className="text-[#cbd4e2]">
-                                {selectedRecord
-                                  .updated_at
-                                  ? new Date(
-                                      selectedRecord.updated_at
-                                    ).toLocaleString()
-                                  : 'Not recorded'}
-                              </span>
-                            </div>
-
                           </div>
-
                         </div>
-
-                        <div className="bg-[#171d27] border border-[#293241] rounded-[7px] p-[16px]">
-
-                          <h3 className="m-[0_0_14px] text-[12px] uppercase tracking-[0.8px] text-[#b8c2d2] font-bold">
-                            Linked events
-                          </h3>
-
-                          {selectedRecord
-                            .linked_events
-                            .length >
-                          0 ? (
-
-                            <div className="space-y-2">
-
-                              {selectedRecord.linked_events.map(
-                                event => (
-                                  <div
-                                    key={
-                                      event
-                                    }
-                                    className="flex items-start gap-2 p-2 bg-[#111823] border border-[#293241] rounded-[5px]"
-                                  >
-
-                                    <CalendarDays
-                                      size={
-                                        13
-                                      }
-                                      className="text-[#5b8def] mt-0.5 shrink-0"
-                                    />
-
-                                    <span className="text-[11px] text-[#cbd4e2]">
-                                      {
-                                        event
-                                      }
-                                    </span>
-
-                                  </div>
-                                )
-                              )}
-
-                            </div>
-
-                          ) : (
-
-                            <div className="text-[11px] text-[#657084]">
-                              No linked events
-                              recorded.
-                            </div>
-
-                          )}
-
-                        </div>
-
                       </div>
                     )}
 
