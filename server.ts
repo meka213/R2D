@@ -223,20 +223,13 @@ async function connectDatabase() {
   }
 }
 
-// Helper to access the main intelligence profiles collection (with fallback to records if needed)
+// Helper to access the main intelligence profiles collection
 async function getProfilesCollection() {
-  const profilesCol = db.collection<RiskRecord>("profiles");
-  const count = await profilesCol.countDocuments();
-  if (count > 0) return profilesCol;
-  const recordsCol = db.collection<RiskRecord>("records");
-  const recCount = await recordsCol.countDocuments();
-  if (recCount > 0) return recordsCol;
-  return profilesCol;
+  return db.collection<RiskRecord>("profiles");
 }
 
 async function seedDatabase() {
   const profilesCollection = db.collection<RiskRecord>("profiles");
-  const recordsCollection = db.collection<RiskRecord>("records");
   const now = new Date().toISOString();
 
   const initialRecords: RiskRecord[] = [
@@ -1972,10 +1965,8 @@ async function seedDatabase() {
     const existing = await profilesCollection.findOne({ id: rec.id });
     if (existing) {
       await profilesCollection.replaceOne({ id: rec.id }, { ...existing, ...rec });
-      await recordsCollection.replaceOne({ id: rec.id }, { ...existing, ...rec });
     } else {
       await profilesCollection.insertOne(rec);
-      await recordsCollection.insertOne(rec);
     }
   }
 
@@ -2013,11 +2004,6 @@ async function seedDatabase() {
   );
 
   await db.collection<RiskRecord>("profiles").createIndex(
-    { id: 1 },
-    { unique: true }
-  );
-
-  await db.collection<RiskRecord>("records").createIndex(
     { id: 1 },
     { unique: true }
   );
@@ -2070,16 +2056,16 @@ function buildTimelineForEntity(record: RiskRecord, authorizedRelated: RiskRecor
       id: birthId,
       date: record.dob,
       date_precision: record.dob.length === 4 ? "year" : record.dob.length === 7 ? "month" : "exact",
-      title: `Birth of ${record.title}`,
+      title: `Birth: ${record.title}`,
       event_type: "Birth",
-      location: record.location || "Libya",
+      location: record.location,
       regions: record.regions,
-      description: `Earliest documented civil and biographical anchor for ${record.title}.`,
+      description: `Documented date of birth for ${record.title}.`,
       related_entities: [record.title],
       record_id: record.id,
-      source: record.source || "Civil Registry Archive",
+      source: record.source,
       source_date: record.dob,
-      confidence: record.confidence || "Verified",
+      confidence: record.confidence,
       is_major: true,
       stage: "start"
     });
@@ -2089,17 +2075,17 @@ function buildTimelineForEntity(record: RiskRecord, authorizedRelated: RiskRecor
   if (record.start_date) {
     const startId = `start-${record.id}`;
     let eventType: TimelineMilestone["event_type"] = "Formation";
-    let title = `Formation / Establishment of ${record.title}`;
+    let title = `Establishment: ${record.title}`;
     let desc = record.summary;
 
     if (isPersonType) {
       eventType = "Appointment";
-      title = `Documented Service Inception: ${record.title}`;
-      desc = `Initial documented institutional command appointment and service for ${record.title}.`;
+      title = `Service Inception: ${record.title}`;
+      desc = `Initial documented service or appointment for ${record.title}.`;
     } else if (isEventType) {
-      eventType = "Clash / Conflict";
-      title = `Outbreak / Start of ${record.title}`;
-      desc = `Initial tactical mobilization and outbreak for ${record.title}. ${record.summary}`;
+      eventType = "Operational activity";
+      title = `Inception: ${record.title}`;
+      desc = `Documented start of ${record.title}. ${record.summary}`;
     }
 
     milestones.push({
@@ -2108,14 +2094,14 @@ function buildTimelineForEntity(record: RiskRecord, authorizedRelated: RiskRecor
       date_precision: record.start_date.length === 4 ? "year" : record.start_date.length === 7 ? "month" : "exact",
       title,
       event_type: eventType,
-      location: record.location || "Libya",
+      location: record.location,
       regions: record.regions,
       description: desc,
       related_entities: [record.title],
       record_id: record.id,
-      source: record.source || "Intelligence Dossier",
+      source: record.source,
       source_date: record.source_date || record.start_date,
-      confidence: record.confidence || "Verified",
+      confidence: record.confidence,
       is_major: true,
       stage: "start"
     });
@@ -2126,37 +2112,50 @@ function buildTimelineForEntity(record: RiskRecord, authorizedRelated: RiskRecor
   if (record.chronology && Array.isArray(record.chronology)) {
     for (const item of record.chronology) {
       let verifiedRecordId: string | undefined = undefined;
+      let isAuthorized = true;
+
       if (item.related_record_id) {
         const found = authorizedRelated.find(r => r.id === item.related_record_id);
         if (found) {
           verifiedRecordId = found.id;
+        } else {
+          // If a related record is specified but not in authorized list,
+          // we check if it refers back to the parent record itself
+          if (item.related_record_id === record.id) {
+            verifiedRecordId = record.id;
+          } else {
+            // Strict enforcement: do not show information about unauthorized related records
+            isAuthorized = false;
+          }
         }
       } else {
         verifiedRecordId = record.id;
       }
 
-      const mId = item.id || `chrono-${record.id}-${item.date}-${milestones.length}`;
-      if (!addedIds.has(mId)) {
-        milestones.push({
-          id: mId,
-          date: item.date,
-          date_precision: item.date_precision || (item.date.length === 4 ? "year" : item.date.length === 7 ? "month" : "exact"),
-          title: item.title,
-          event_type: item.event_type || "Security",
-          location: item.location || record.location,
-          regions: item.regions || record.regions,
-          coordinates: item.coordinates || record.coordinates,
-          description: item.description,
-          related_entities: item.related_entities || [record.title],
-          source: item.source || record.source,
-          source_date: item.source_date,
-          confidence: item.confidence || record.confidence,
-          related_record_id: verifiedRecordId,
-          record_id: verifiedRecordId,
-          is_major: item.is_major !== false,
-          stage: item.stage || "development"
-        });
-        addedIds.add(mId);
+      if (isAuthorized) {
+        const mId = item.id || `chrono-${record.id}-${item.date}-${milestones.length}`;
+        if (!addedIds.has(mId)) {
+          milestones.push({
+            id: mId,
+            date: item.date,
+            date_precision: item.date_precision || (item.date.length === 4 ? "year" : item.date.length === 7 ? "month" : "exact"),
+            title: item.title,
+            event_type: item.event_type || "Security",
+            location: item.location || record.location,
+            regions: item.regions || record.regions,
+            coordinates: item.coordinates || record.coordinates,
+            description: item.description,
+            related_entities: item.related_entities || [record.title],
+            source: item.source || record.source,
+            source_date: item.source_date,
+            confidence: item.confidence || record.confidence,
+            related_record_id: verifiedRecordId,
+            record_id: verifiedRecordId,
+            is_major: !!item.is_major,
+            stage: item.stage || "development"
+          });
+          addedIds.add(mId);
+        }
       }
     }
   }
@@ -2173,14 +2172,14 @@ function buildTimelineForEntity(record: RiskRecord, authorizedRelated: RiskRecor
     if (relDate) {
       const relId = `rel-${rel.id}`;
       if (!addedIds.has(relId) && !milestones.some(m => m.record_id === rel.id || m.title.includes(rel.title))) {
-        let eventType: TimelineMilestone["event_type"] = "Security";
+        let eventType: TimelineMilestone["event_type"] = "Operational activity";
         let stage: TimelineMilestone["stage"] = "development";
         let title = rel.title;
         let isMajor = false;
 
         if (isRelEvent || isLinkedEvent) {
-          eventType = "Clash / Conflict";
-          stage = rel.is_ongoing ? "ongoing" : (rel.end_date ? "end" : "escalation");
+          eventType = "Operational activity";
+          stage = rel.is_ongoing ? "ongoing" : (rel.end_date ? "end" : "development");
           title = `Engagement: ${rel.title}`;
           isMajor = true;
         } else if (isRelAffiliation) {
@@ -2190,8 +2189,8 @@ function buildTimelineForEntity(record: RiskRecord, authorizedRelated: RiskRecor
           isMajor = true;
         } else if (isRelRivalry) {
           eventType = "Rivalry";
-          title = `Friction & Strategic Rivalry: ${rel.title}`;
-          stage = "escalation";
+          title = `Strategic Rivalry: ${rel.title}`;
+          stage = "development";
           isMajor = false;
         }
 
@@ -2201,16 +2200,16 @@ function buildTimelineForEntity(record: RiskRecord, authorizedRelated: RiskRecor
           date_precision: rel.date_precision || (relDate.length === 4 ? "year" : relDate.length === 7 ? "month" : "exact"),
           title,
           event_type: eventType,
-          location: rel.location || record.location || "Tripoli",
+          location: rel.location,
           regions: rel.regions,
           coordinates: rel.coordinates,
           description: rel.summary,
           related_entities: [rel.title, record.title],
           record_id: rel.id,
           related_record_id: rel.id,
-          source: rel.source || record.source,
+          source: rel.source,
           source_date: rel.source_date,
-          confidence: rel.confidence || "High",
+          confidence: rel.confidence,
           is_major: isMajor,
           stage
         });
@@ -2227,16 +2226,16 @@ function buildTimelineForEntity(record: RiskRecord, authorizedRelated: RiskRecor
         id: endId,
         date: record.end_date,
         date_precision: record.end_date.length === 4 ? "year" : record.end_date.length === 7 ? "month" : "exact",
-        title: `Resolution / End of ${record.title}`,
+        title: `Resolution: ${record.title}`,
         event_type: "Ceasefire / Truce",
         location: record.location,
         regions: record.regions,
-        description: `Formal conclusion, ceasefire ratification, or operational termination of ${record.title}.`,
+        description: `Operational termination or documented resolution of ${record.title}.`,
         related_entities: [record.title],
         record_id: record.id,
         source: record.source,
         source_date: record.end_date,
-        confidence: record.confidence || "Verified",
+        confidence: record.confidence,
         is_major: true,
         stage: "end"
       });
@@ -2249,15 +2248,15 @@ function buildTimelineForEntity(record: RiskRecord, authorizedRelated: RiskRecor
         id: ongoingId,
         date: record.updated_at ? record.updated_at.split("T")[0] : "2026",
         date_precision: "year",
-        title: `Active Threat Status: ${record.title}`,
+        title: `Active Status: ${record.title}`,
         event_type: "Security",
         location: record.location,
         regions: record.regions,
-        description: `Ongoing tactical monitoring indicates persistent security friction and operational activity.`,
+        description: `Ongoing tactical monitoring indicates persistent operational activity and presence.`,
         related_entities: [record.title],
         record_id: record.id,
         source: record.source,
-        confidence: record.confidence || "High",
+        confidence: record.confidence,
         is_major: true,
         stage: "ongoing"
       });
@@ -2683,59 +2682,6 @@ async function startServer() {
   });
 
   /*
-   * PUBLIC TIMELINE API
-   */
-
-  app.get("/api/records/:id/timeline", async (req, res) => {
-    try {
-      const { id } = req.params;
-      const profilesCollection = await getProfilesCollection();
-      const record = await profilesCollection.findOne({ id });
-
-      if (!record) {
-        return res.status(404).json({
-          error: "Record not found"
-        });
-      }
-
-      const allRelated = await profilesCollection
-        .find({
-          id: { $ne: record.id },
-          $or: [
-            { linked_events: record.title },
-            { affiliations: record.title },
-            { rivalries: record.title },
-            { title: { $in: [...(record.linked_events || []), ...(record.affiliations || []), ...(record.rivalries || [])] } },
-            { id: { $in: (record.chronology || []).map((c: TimelineMilestone) => c.related_record_id).filter(Boolean) } }
-          ]
-        })
-        .toArray();
-
-      const milestones = buildTimelineForEntity(record, allRelated);
-
-      res.json({
-        entity: {
-          id: record.id,
-          title: record.title,
-          entity_type: record.entity_type,
-          regions: record.regions,
-          location: record.location,
-          dob: record.dob,
-          start_date: record.start_date,
-          end_date: record.end_date,
-          is_ongoing: record.is_ongoing
-        },
-        milestones
-      });
-    } catch (error) {
-      console.error("Public timeline error:", error);
-      res.status(500).json({
-        error: "Failed to build entity timeline"
-      });
-    }
-  });
-
-  /*
    * ============================================================
    * DATABASE STATUS
    * ============================================================
@@ -2744,16 +2690,14 @@ async function startServer() {
   app.get("/api/database/status", async (req, res) => {
     try {
       const latestRecord =
-        await db
-          .collection<RiskRecord>("records")
+        await (await getProfilesCollection())
           .find({})
           .sort({ updated_at: -1 })
           .limit(1)
           .toArray();
 
       const totalRecords =
-        await db
-          .collection<RiskRecord>("records")
+        await (await getProfilesCollection())
           .countDocuments();
 
       res.json({
@@ -2925,7 +2869,6 @@ async function startServer() {
       };
 
       await db.collection<RiskRecord>("profiles").insertOne(newRecord);
-      await db.collection<RiskRecord>("records").insertOne(newRecord);
 
       res.status(201).json(newRecord);
     } catch (error) {
@@ -3043,10 +2986,6 @@ async function startServer() {
         { id },
         updatedRecord
       );
-      await db.collection<RiskRecord>("records").replaceOne(
-        { id },
-        updatedRecord
-      );
 
       res.json(updatedRecord);
     } catch (error) {
@@ -3070,9 +3009,8 @@ async function startServer() {
       const { id } = req.params;
 
       const pRes = await db.collection<RiskRecord>("profiles").deleteOne({ id });
-      const rRes = await db.collection<RiskRecord>("records").deleteOne({ id });
 
-      if (pRes.deletedCount === 0 && rRes.deletedCount === 0) {
+      if (pRes.deletedCount === 0) {
         return res.status(404).json({
           error: "Record not found"
         });
