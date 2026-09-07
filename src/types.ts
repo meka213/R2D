@@ -10,6 +10,7 @@ export interface TimelineMilestone {
   regions: string[];
   coordinates?: { lat: number; lng: number };
   source_record_id?: string;
+  source_record_type?: string;
   source?: string;
   source_date?: string;
   confidence?: string;

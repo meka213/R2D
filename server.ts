@@ -142,18 +142,18 @@ function adaptRecord(raw: any): RiskRecord {
     rivalries: Array.isArray(raw.rivalries) ? raw.rivalries : [],
     summary: raw.summary || raw.text || "",
     linked_events: Array.isArray(raw.linked_neo4j_nodes) ? raw.linked_neo4j_nodes : [],
-    updated_at: raw.updated_at || new Date().toISOString(),
+    updated_at: raw.updated_at ? (typeof raw.updated_at === 'string' ? raw.updated_at : raw.updated_at.toISOString()) : new Date().toISOString(),
     dob: raw.dob,
     start_date: raw.start_date,
     end_date: raw.end_date,
-    is_ongoing: !!raw.is_ongoing,
+    is_ongoing: raw.is_ongoing === true,
     date_precision: raw.date_precision,
     location: raw.location,
     coordinates: raw.coordinates,
     source: raw.source,
     source_date: raw.source_date,
     confidence: raw.confidence,
-    chronology: raw.chronology
+    chronology: Array.isArray(raw.chronology) ? raw.chronology : undefined
   };
 }
 
@@ -197,47 +197,24 @@ async function refreshEntityTimeline(recordId: string) {
 
   const autoNodes: Omit<TimelineMilestone, "id">[] = [];
 
-  // 1. Birth/Formation - Only if explicit date exists
-  if (record.dob || record.start_date) {
-    const date = record.dob || record.start_date;
-    if (date) {
-      autoNodes.push({
-        entity_id: record.id,
-        date: date,
-        date_precision: record.date_precision || (date.length === 4 ? 'year' : date.length === 7 ? 'month' : 'exact'),
-        title: record.entity_type.toLowerCase().includes('person') ? `Birth: ${record.title}` : `Formation: ${record.title}`,
-        event_type: record.entity_type.toLowerCase().includes('person') ? 'Birth' : 'Establishment',
-        description: `Documented start for ${record.title}.`,
-        location: record.location,
-        regions: record.regions,
-        coordinates: record.coordinates,
-        source_record_id: record.id,
-        source_record_type: record.entity_type,
-        source: record.source,
-        source_date: record.source_date,
-        confidence: record.confidence,
-        origin: 'auto',
-        is_major: true,
-        visible: true,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      });
-    }
-  }
-
-  // 2. End date / Dissolution
-  if (record.end_date) {
+  // 1. Birth/Formation - Only if explicit dated fields exist
+  // For Person: dob
+  if (record.entity_type.toLowerCase().includes('person') && record.dob) {
     autoNodes.push({
       entity_id: record.id,
-      date: record.end_date,
-      date_precision: 'exact',
-      title: record.entity_type.toLowerCase().includes('person') ? `Death: ${record.title}` : `Dissolution: ${record.title}`,
-      event_type: record.entity_type.toLowerCase().includes('person') ? 'Death' : 'Dissolution',
-      description: `Documented end for ${record.title}.`,
+      date: record.dob,
+      date_precision: record.date_precision || (record.dob.length === 4 ? 'year' : 'exact'),
+      title: `Birth: ${record.title}`,
+      event_type: 'Birth',
+      description: `Documented birth for ${record.title}.`,
       location: record.location,
       regions: record.regions,
+      coordinates: record.coordinates,
       source_record_id: record.id,
       source_record_type: record.entity_type,
+      source: record.source,
+      source_date: record.source_date,
+      confidence: record.confidence,
       origin: 'auto',
       is_major: true,
       visible: true,
@@ -246,22 +223,47 @@ async function refreshEntityTimeline(recordId: string) {
     });
   }
 
-  // 3. Last update - Assessment milestone
-  if (record.updated_at && !record.is_ongoing) {
-    const date = record.updated_at.split('T')[0];
+  // For Organization/Group: start_date
+  const isOrg = ['Armed Group', 'Brigade', 'Militia', 'Security Actor', 'militia', 'armed_group'].some(t => record.entity_type.toLowerCase().includes(t.toLowerCase()));
+  if (isOrg && record.start_date) {
     autoNodes.push({
       entity_id: record.id,
-      date: date,
+      date: record.start_date,
+      date_precision: record.date_precision || (record.start_date.length === 4 ? 'year' : 'exact'),
+      title: `Formation: ${record.title}`,
+      event_type: 'Establishment',
+      description: `Documented formation of ${record.title}.`,
+      location: record.location,
+      regions: record.regions,
+      coordinates: record.coordinates,
+      source_record_id: record.id,
+      source_record_type: record.entity_type,
+      source: record.source,
+      source_date: record.source_date,
+      confidence: record.confidence,
+      origin: 'auto',
+      is_major: true,
+      visible: true,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    });
+  }
+
+  // 2. End date / Dissolution - Only if explicit end_date exists
+  if (record.end_date) {
+    autoNodes.push({
+      entity_id: record.id,
+      date: record.end_date,
       date_precision: 'exact',
-      title: `Intelligence Update: ${record.title}`,
-      event_type: 'Assessment',
-      description: `Latest documented intelligence assessment for ${record.title}.`,
+      title: record.entity_type.toLowerCase().includes('person') ? `Death: ${record.title}` : `Dissolution: ${record.title}`,
+      event_type: record.entity_type.toLowerCase().includes('person') ? 'Death' : 'Dissolution',
+      description: `Documented end of activity for ${record.title}.`,
       location: record.location,
       regions: record.regions,
       source_record_id: record.id,
       source_record_type: record.entity_type,
       origin: 'auto',
-      is_major: false,
+      is_major: true,
       visible: true,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
@@ -294,10 +296,14 @@ async function getAuthorizedTimeline(clientId: string, entityId: string): Promis
 
   const record = adaptRecord(rawRecord);
   
-  const hasRegionPermission = record.regions.length === 0 || record.regions.some(r => client.allowed_regions.includes(r));
+  // Verify region permission
+  const hasRegionPermission = record.regions.some(r => client.allowed_regions.includes(r));
+  // Verify entity type permission
   const hasTypePermission = client.allowed_types.includes(record.entity_type);
 
-  if (!hasRegionPermission || !hasTypePermission) return [];
+  if (!hasRegionPermission || !hasTypePermission) {
+    return [];
+  }
 
   const nodes = await timelineCollection.find({ 
     entity_id: record.id,
@@ -309,12 +315,12 @@ async function getAuthorizedTimeline(clientId: string, entityId: string): Promis
   for (const node of nodes) {
     let sourceAuthorized = true;
 
-    // Strict cross-check for related records
+    // Strict cross-check for related records provenance
     if (node.source_record_id && node.source_record_id !== record.id) {
-      const sourceRegions = node.regions || ["West"]; // Default to West for current dataset
+      const sourceRegions = node.regions || ["West"]; 
       const sourceType = node.source_record_type;
       
-      const hasSourceRegion = sourceRegions.length === 0 || sourceRegions.some(r => client.allowed_regions.includes(r));
+      const hasSourceRegion = sourceRegions.some(r => client.allowed_regions.includes(r));
       const hasSourceType = !sourceType || client.allowed_types.includes(sourceType);
       
       if (!hasSourceRegion || !hasSourceType) {
@@ -515,32 +521,28 @@ async function startServer() {
 
       const profilesCollection = await getProfilesCollection();
 
-      const filtered = await profilesCollection
-        .find({
-          regions: {
-            $in: client.allowed_regions || []
-          },
-          entity_type: {
-            $in: client.allowed_types || []
-          }
-        })
-        .sort({
-          updated_at: -1
-        })
+      // Load all profiles to apply normalization-based authorization
+      const allRaw = await profilesCollection
+        .find({})
+        .sort({ updated_at: -1 })
         .toArray();
+
+      const filtered = allRaw
+        .map(raw => adaptRecord(raw))
+        .filter(record => {
+          // Check region permission
+          const hasRegion = record.regions.some(r => client.allowed_regions.includes(r));
+          // Check type permission
+          const hasType = client.allowed_types.includes(record.entity_type);
+          return hasRegion && hasType;
+        });
 
       await db.collection<AccessLog>("access_logs").insertOne({
         id: `LOG-${Date.now()}`,
         client_id: client.id,
         client_name: client.name,
         action: "Data Access",
-        regions: Array.from(
-          new Set(
-            filtered.flatMap(
-              record => record.regions || []
-            )
-          )
-        ),
+        regions: client.allowed_regions,
         timestamp: new Date().toISOString()
       });
 
@@ -649,6 +651,18 @@ async function startServer() {
       const { id } = req.params;
       const nodeData = req.body;
       const timelineCollection = await getTimelineCollection();
+      const profilesCollection = await getProfilesCollection();
+
+      // Verify entity existence
+      const entity = await profilesCollection.findOne(getQueryId(id));
+      if (!entity) {
+        return res.status(404).json({ error: "Target entity profile not found" });
+      }
+
+      // Validate required fields
+      if (!nodeData.date || !nodeData.title || !nodeData.event_type || !nodeData.description) {
+        return res.status(400).json({ error: "Missing required fields (date, title, event_type, description)" });
+      }
 
       const newNode: TimelineMilestone = {
         ...nodeData,
@@ -691,9 +705,15 @@ async function startServer() {
       const existing = await timelineCollection.findOne({ id: timelineId });
       if (!existing) return res.status(404).json({ error: "Node not found" });
 
+      // Prevent unauthorized modification of identity fields
+      const { id, entity_id, origin, created_at, ...allowedUpdates } = updateData;
+
       const updated = {
         ...existing,
-        ...updateData,
+        ...allowedUpdates,
+        id: existing.id, // Enforce
+        entity_id: existing.entity_id, // Enforce
+        origin: existing.origin, // Enforce
         updated_at: new Date().toISOString()
       };
 
@@ -750,31 +770,11 @@ async function startServer() {
 
   /*
    * ============================================================
-   * PUBLIC RECORDS API
+   * PUBLIC API - (SECURED)
    * ============================================================
    */
 
-  app.get("/api/records", async (req, res) => {
-    try {
-      const profilesCollection = await getProfilesCollection();
-      const records =
-        await profilesCollection
-          .find({})
-          .sort({ updated_at: -1 })
-          .toArray();
-
-      res.json(records);
-    } catch (error) {
-      console.error(
-        "Public records error:",
-        error
-      );
-
-      res.status(500).json({
-        error: "Failed to retrieve records"
-      });
-    }
-  });
+  // Public /api/records removed for security. Access through /api/client/records instead.
 
   /*
    * ============================================================

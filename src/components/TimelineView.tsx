@@ -102,19 +102,21 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
 
     const fetchServerTimeline = async () => {
       if (!record?.id) return;
+      
+      const accessKey = clientAccessKey || sessionStorage.getItem('r2d_client_key') || '';
+      if (!accessKey) {
+        setIsLoadingServer(false);
+        return;
+      }
+
       setIsLoadingServer(true);
 
       try {
-        let res: Response;
-        if (accessKey) {
-          res = await fetch(`/api/client/records/${encodeURIComponent(record.id)}/timeline`, {
-            headers: {
-              'x-access-key': accessKey
-            }
-          });
-        } else {
-          res = await fetch(`/api/records/${encodeURIComponent(record.id)}/timeline`);
-        }
+        const res = await fetch(`/api/client/records/${encodeURIComponent(record.id)}/timeline`, {
+          headers: {
+            'x-access-key': accessKey
+          }
+        });
 
         if (res.ok && isMounted) {
           const data = await res.json();
@@ -123,8 +125,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
           }
         }
       } catch (err) {
-        // Fallback gracefully to client-side data
-        console.warn('Could not retrieve server timeline, falling back to local dataset', err);
+        console.warn('Could not retrieve server timeline', err);
       } finally {
         if (isMounted) {
           setIsLoadingServer(false);
@@ -139,18 +140,14 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
     };
   }, [record.id, clientAccessKey]);
 
-  // Assemble milestones: use server-validated milestones if available
+  // Assemble milestones: use server-validated milestones ONLY
   const rawMilestones: TimelineMilestone[] = useMemo(() => {
     if (serverMilestones && serverMilestones.length > 0) {
       return serverMilestones;
     }
 
-    if (record.chronology && record.chronology.length > 0) {
-      return record.chronology;
-    }
-
     return [];
-  }, [serverMilestones, record]);
+  }, [serverMilestones]);
 
   // Sort milestones
   const sortedMilestones = useMemo(() => {
@@ -249,10 +246,10 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
   // Export Chronology to Clipboard
   const handleExportChronology = () => {
     const header =
-      `R2D TACTICAL CHRONOLOGY DOSSIER\n` +
+      `R2D RECORDED CHRONOLOGY DOSSIER\n` +
       `ENTITY: ${record.title} [${record.id}] — TYPE: ${record.entity_type}\n` +
       `REGION(S): ${(record.regions || []).join(', ')}\n` +
-      `CLASSIFICATION: RESTRICTED / CLIENT CLEARANCE\n` +
+      `CLASSIFICATION: RESTRICTED\n` +
       `GENERATED AT: ${new Date().toISOString()}\n` +
       `============================================================\n\n`;
 
@@ -263,7 +260,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
         if (m.location) text += `Location: ${m.location} (${itemRegions})\n`;
         if (m.stage) text += `Stage: ${m.stage.toUpperCase()}\n`;
         text += `Summary: ${m.description}\n`;
-        if (m.source) text += `Source: ${m.source} (${m.source_date || 'N/A'}) [Confidence: ${m.confidence || 'Verified'}]\n`;
+        if (m.source) text += `Source: ${m.source} (${m.source_date || 'N/A'}) [Confidence: ${m.confidence || 'Not specified'}]\n`;
         if (m.related_entities && m.related_entities.length > 0) {
           text += `Related Entities: ${m.related_entities.join(', ')}\n`;
         }
@@ -290,20 +287,20 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
       `REGIONAL THEATER: ${(record.regions || []).join(', ')}\n` +
       `OPERATIONAL BASE: ${record.location || 'Libya'}\n` +
       `START / INCEPTION: ${record.dob || record.start_date || 'Documented'}\n` +
-      `CURRENT STATUS: ${record.is_ongoing !== false ? 'ACTIVE / ONGOING' : 'RESOLVED'}\n` +
-      `CONFIDENCE LEVEL: ${record.confidence || 'Verified'}\n\n` +
+      `CURRENT STATUS: ${record.is_ongoing === true ? 'ACTIVE / ONGOING' : (record.is_ongoing === false ? 'RESOLVED' : 'Not specified')}\n` +
+      `CONFIDENCE LEVEL: ${record.confidence || 'Not specified'}\n\n` +
       `EXECUTIVE ASSESSMENT:\n` +
       `${record.summary}\n\n` +
       `AFFILIATIONS: ${(record.affiliations || []).join(', ') || 'None recorded'}\n` +
       `RIVALRIES: ${(record.rivalries || []).join(', ') || 'None recorded'}\n` +
       `LINKED EVENTS: ${(record.linked_events || []).join(', ') || 'None recorded'}\n\n` +
-      `VERIFIED CHRONOLOGICAL TIMELINE (${sortedMilestones.length} Milestones):\n` +
+      `RECORDED CHRONOLOGICAL TIMELINE (${sortedMilestones.length} Milestones):\n` +
       `------------------------------------------------------------\n` +
       sortedMilestones
         .map(m => `• [${m.date}] (${m.event_type}) ${m.title} — ${m.location || ''}\n  ${m.description}`)
         .join('\n\n') +
       `\n\n============================================================\n` +
-      `END OF REPORT — CONFIDENTIAL & PROPRIETARY INTELLIGENCE\n`;
+      `END OF REPORT — RESTRICTED INFORMATION\n`;
 
     navigator.clipboard.writeText(reportText);
     setReportCopied(true);
@@ -430,7 +427,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
             <div className="flex items-center gap-2 mb-1 flex-wrap">
               <Clock size={16} className="text-[#5b8def]" />
               <h3 className="m-0 text-[13px] uppercase tracking-[0.9px] text-[#ffffff] font-bold">
-                Chronological Timeline & Tactical History
+                Documented Timeline & Recorded History
               </h3>
               <span className="px-2 py-0.5 rounded bg-[#111823] border border-[#293241] text-[10px] text-[#5b8def] font-mono font-bold">
                 {rawMilestones.length} Recorded Milestones
@@ -442,7 +439,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
               )}
             </div>
             <p className="text-[11px] text-[#8f9bad] m-0">
-              Verified operational trajectory of <strong className="text-[#d8deea]">{record.title}</strong> ({record.entity_type}) across documented milestones, alliances, and engagements.
+              Recorded chronology of <strong className="text-[#d8deea]">{record.title}</strong> ({record.entity_type}) across documented milestones and engagements.
             </p>
           </div>
 
@@ -841,12 +838,12 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
                               Confidence:{' '}
                               <span
                                 className={`px-1.5 py-0.5 rounded text-[9px] ${
-                                  milestone.confidence === 'Verified'
+                                  milestone.confidence && milestone.confidence.toLowerCase() === 'verified'
                                     ? 'bg-[#0f2e22] text-[#34d399] border border-[#065f46]'
                                     : 'bg-[#152a42] text-[#60a5fa] border border-[#2563eb]'
                                 }`}
                               >
-                                {milestone.confidence || 'Verified'}
+                                {milestone.confidence || 'Not specified'}
                               </span>
                             </span>
                           </div>
@@ -857,7 +854,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
                                 Primary Source Reference
                               </span>
                               <span className="font-mono text-[10px] text-[#d8deea]">
-                                {milestone.source || 'R2D Tactical Intelligence Archive'}
+                                {milestone.source || 'R2D Intelligence Archive'}
                               </span>
                             </div>
                             <div>
@@ -906,7 +903,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
                     Operational Intelligence Dossier Report
                   </h3>
                   <span className="text-[10px] font-mono text-[#8f9bad]">
-                    REF: {record.id} — CLASSIFIED CLIENT OUTPUT
+                    REF: {record.id} — RESTRICTED OUTPUT
                   </span>
                 </div>
               </div>
@@ -945,7 +942,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
               {/* Summary Assessment */}
               <div>
                 <h4 className="text-[11px] uppercase tracking-wider font-bold text-[#5b8def] mb-1.5">
-                  Executive Threat Assessment
+                  Executive Assessment
                 </h4>
                 <div className="bg-[#171d27] border-l-2 border-[#5b8def] p-3 rounded-r text-[#d8deea] leading-relaxed text-[11px]">
                   {record.summary}
@@ -955,7 +952,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
               {/* Chronological Table */}
               <div>
                 <h4 className="text-[11px] uppercase tracking-wider font-bold text-[#5b8def] mb-2 flex items-center justify-between">
-                  <span>Verified Chronological Milestones ({sortedMilestones.length})</span>
+                  <span>Recorded Chronological Milestones ({sortedMilestones.length})</span>
                   <span className="text-[10px] text-[#657084] font-normal">Earliest to Present</span>
                 </h4>
                 <div className="border border-[#293241] rounded overflow-hidden">
