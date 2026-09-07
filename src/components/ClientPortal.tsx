@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Shield,
@@ -98,9 +98,12 @@ function buildNetwork(record: Record): {
   ) => {
     (values || []).forEach((value, index) => {
       const label = String(value || '').trim();
+
       if (!label) return;
 
-      const id = `${type}-${index}-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+      const id = `${type}-${index}-${label
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')}`;
 
       if (!nodes.some(n => n.id === id)) {
         nodes.push({
@@ -135,6 +138,33 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // Controls whether the live search dropdown is visible.
+  const [showSearchResults, setShowSearchResults] = useState(false);
+
+  // Used to detect clicks outside the search area.
+  const searchContainerRef = useRef<HTMLDivElement | null>(null);
+
+  /*
+   * Close search suggestions when clicking anywhere outside
+   * the search container.
+   */
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        searchContainerRef.current &&
+        !searchContainerRef.current.contains(event.target as Node)
+      ) {
+        setShowSearchResults(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -155,12 +185,16 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
         setClient(clientData);
         setSelectedId(null);
         setSearch('');
+        setShowSearchResults(false);
         setActiveTab('overview');
 
         fetchRecords(clientData.access_key);
       } else {
         const errData = await res.json();
-        setError(errData.error || 'Invalid Intelligence Access Key');
+
+        setError(
+          errData.error || 'Invalid Intelligence Access Key'
+        );
       }
     } catch (err) {
       setError('Connection failure');
@@ -182,7 +216,6 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
 
         setRecords(data);
 
-        // IMPORTANT:
         // Do not automatically open the first record.
         setSelectedId(null);
       }
@@ -285,7 +318,9 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
     ];
 
     return searchableFields.some(field =>
-      String(field || '').toLowerCase().includes(normalizedSearch)
+      String(field || '')
+        .toLowerCase()
+        .includes(normalizedSearch)
     );
   });
 
@@ -302,15 +337,58 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
   const handleSearch = (value: string) => {
     setSearch(value);
 
-    // When the user starts a new search, close the previous profile.
+    /*
+     * When the user types, show the live search results.
+     */
     if (value.trim()) {
+      setShowSearchResults(true);
+
+      // Close any previously opened profile when starting a new search.
       setSelectedId(null);
       setActiveTab('overview');
+    } else {
+      setShowSearchResults(false);
+    }
+  };
+
+  const handleSearchFocus = () => {
+    if (search.trim()) {
+      setShowSearchResults(true);
+    }
+  };
+
+  const handleSearchKeyDown = (
+    e: React.KeyboardEvent<HTMLInputElement>
+  ) => {
+    /*
+     * Pressing Enter closes the suggestions.
+     *
+     * If there is exactly one match, open it automatically.
+     * If there are multiple matches, keep the search active but
+     * simply close the dropdown.
+     */
+    if (e.key === 'Enter') {
+      e.preventDefault();
+
+      if (filteredRecords.length === 1) {
+        openRecord(filteredRecords[0].id);
+      } else {
+        setShowSearchResults(false);
+      }
+    }
+
+    /*
+     * Escape immediately closes the suggestions.
+     */
+    if (e.key === 'Escape') {
+      setShowSearchResults(false);
     }
   };
 
   const openRecord = (id: string) => {
     setSelectedId(id);
+    setSearch('');
+    setShowSearchResults(false);
     setActiveTab('overview');
   };
 
@@ -372,7 +450,10 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
         </div>
 
         {/* Search */}
-        <div className="relative mb-[18px]">
+        <div
+          ref={searchContainerRef}
+          className="relative mb-[18px]"
+        >
           <div className="flex gap-[10px]">
             <div className="flex-1 relative">
               <Search
@@ -383,6 +464,8 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
               <input
                 value={search}
                 onChange={e => handleSearch(e.target.value)}
+                onFocus={handleSearchFocus}
+                onKeyDown={handleSearchKeyDown}
                 placeholder="Search names, entities, locations, affiliations, rivalries, tags or events..."
                 className="w-full bg-[#151a22] border border-[#293241] rounded-[7px] text-[#e7ebf2] p-[13px_15px_13px_45px] text-[14px] outline-none focus:border-[#456bb8] transition-colors"
               />
@@ -390,8 +473,9 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
           </div>
 
           {/* Live search results */}
-          {normalizedSearch && (
+          {normalizedSearch && showSearchResults && (
             <div className="absolute z-50 left-0 right-0 mt-2 bg-[#121720] border border-[#293241] rounded-[8px] shadow-2xl overflow-hidden">
+
               <div className="px-4 py-3 border-b border-[#293241] flex justify-between items-center">
                 <span className="text-[10px] uppercase tracking-widest font-bold text-[#8f9bad]">
                   Intelligence Search
@@ -405,6 +489,7 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
 
               {filteredRecords.length > 0 ? (
                 <div className="max-h-[360px] overflow-y-auto custom-scrollbar">
+
                   {filteredRecords.slice(0, 12).map(record => (
                     <button
                       key={record.id}
@@ -412,7 +497,9 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                       className="w-full text-left px-4 py-3 border-b border-[#202733] hover:bg-[#171d27] transition-colors"
                     >
                       <div className="flex items-start justify-between gap-4">
+
                         <div className="min-w-0">
+
                           <div className="font-bold text-[13px] text-[#e7ebf2] truncate">
                             {record.title}
                           </div>
@@ -442,18 +529,22 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                               </span>
                             ))}
                           </div>
+
                         </div>
 
                         <ChevronRight
                           size={16}
                           className="text-[#5b8def] shrink-0 mt-1"
                         />
+
                       </div>
                     </button>
                   ))}
+
                 </div>
               ) : (
                 <div className="p-8 text-center">
+
                   <Search
                     size={28}
                     className="mx-auto mb-3 text-[#465267]"
@@ -466,8 +557,10 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                   <p className="text-[10px] text-[#657084] mt-1">
                     Try a name, organization, location, tag or event.
                   </p>
+
                 </div>
               )}
+
             </div>
           )}
         </div>
@@ -477,7 +570,9 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
           {/* Main panel */}
           <main className="bg-[#121720] border border-[#293241] rounded-[8px] overflow-hidden">
             <AnimatePresence mode="wait">
+
               {selectedRecord ? (
+
                 <motion.div
                   key={selectedRecord.id}
                   initial={{ opacity: 0 }}
@@ -487,8 +582,11 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
 
                   {/* Hero */}
                   <section className="p-[20px_21px_17px]">
+
                     <div className="flex justify-between gap-[20px]">
+
                       <div>
+
                         <button
                           onClick={() => setSelectedId(null)}
                           className="flex items-center gap-1 text-[10px] text-[#718096] hover:text-[#5b8def] mb-3 uppercase tracking-widest font-bold"
@@ -503,20 +601,25 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
 
                         <div className="mt-[5px] text-[#8f9bad] font-medium">
                           {selectedRecord.entity_type} •{' '}
-                          {selectedRecord.regions.join(', ') || 'Region not specified'}
+                          {selectedRecord.regions.join(', ') ||
+                            'Region not specified'}
                         </div>
+
                       </div>
 
                       <div className="text-[11px] text-[#d9ffe8] bg-[#143f2a] border border-[#286f49] p-[5px_9px] rounded-[14px] h-fit font-bold uppercase tracking-wider">
                         Active Record
                       </div>
+
                     </div>
 
                     <div className="grid grid-cols-2 sm:grid-cols-5 gap-[9px] mt-[18px]">
+
                       <div className="bg-[#171d27] border border-[#293241] rounded-[7px] p-[11px]">
                         <div className="text-[18px] font-bold">
                           {selectedRecord.linked_events?.length || 0}
                         </div>
+
                         <div className="text-[10px] text-[#8f9bad] mt-[3px] uppercase tracking-[0.6px] font-bold">
                           Events
                         </div>
@@ -526,6 +629,7 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                         <div className="text-[18px] font-bold">
                           {selectedRecord.tags.length}
                         </div>
+
                         <div className="text-[10px] text-[#8f9bad] mt-[3px] uppercase tracking-[0.6px] font-bold">
                           Tags
                         </div>
@@ -535,6 +639,7 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                         <div className="text-[18px] font-bold">
                           {selectedRecord.regions.length}
                         </div>
+
                         <div className="text-[10px] text-[#8f9bad] mt-[3px] uppercase tracking-[0.6px] font-bold">
                           Regions
                         </div>
@@ -544,6 +649,7 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                         <div className="text-[18px] font-bold">
                           {records.length}
                         </div>
+
                         <div className="text-[10px] text-[#8f9bad] mt-[3px] uppercase tracking-[0.6px] font-bold">
                           Feed Items
                         </div>
@@ -553,15 +659,19 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                         <div className="text-[18px] font-bold text-[#57b981]">
                           Active
                         </div>
+
                         <div className="text-[10px] text-[#8f9bad] mt-[3px] uppercase tracking-[0.6px] font-bold">
                           Record
                         </div>
                       </div>
+
                     </div>
+
                   </section>
 
                   {/* Tabs */}
                   <nav className="flex border-b border-[#293241] p-[0_20px]">
+
                     {[
                       ['overview', 'Overview'],
                       ['network', 'Network'],
@@ -579,6 +689,7 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                         {label}
                       </div>
                     ))}
+
                   </nav>
 
                   {/* Content */}
@@ -589,11 +700,13 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                       <div className="grid grid-cols-1 md:grid-cols-[1.25fr_0.75fr] gap-[15px]">
 
                         <div className="bg-[#171d27] border border-[#293241] rounded-[7px] p-[16px]">
+
                           <h3 className="m-[0_0_11px] text-[12px] uppercase tracking-[0.8px] text-[#b8c2d2] font-bold">
                             Intelligence assessment
                           </h3>
 
                           <div className="border-l-[3px] border-[#5b8def] p-[12px_14px] bg-[#111823] text-[#d8deea] leading-[1.7] rounded-[0_5px_5px_0]">
+
                             {assessment.paragraphs.map((paragraph, index) => (
                               <p
                                 key={index}
@@ -602,6 +715,7 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                                 {paragraph}
                               </p>
                             ))}
+
                           </div>
 
                           <h3 className="m-[20px_0_11px] text-[12px] uppercase tracking-[0.8px] text-[#b8c2d2] font-bold">
@@ -609,22 +723,32 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                           </h3>
 
                           <div className="flex flex-wrap gap-2">
+
                             {selectedRecord.affiliations.length > 0 ? (
+
                               selectedRecord.affiliations.map(aff => (
                                 <span
                                   key={aff}
                                   className="flex items-center gap-1.5 p-[5px_8px] bg-[#111823] border border-[#293241] rounded-[4px] text-[11px] text-[#cbd4e2]"
                                 >
-                                  <Users size={11} className="text-[#5b8def]" />
+                                  <Users
+                                    size={11}
+                                    className="text-[#5b8def]"
+                                  />
                                   {aff}
                                 </span>
                               ))
+
                             ) : (
+
                               <span className="text-[11px] text-[#657084]">
                                 No affiliations recorded.
                               </span>
+
                             )}
+
                           </div>
+
                         </div>
 
                         <div className="bg-[#171d27] border border-[#293241] rounded-[7px] p-[16px]">
@@ -639,8 +763,10 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                               <small className="block text-[#8f9bad] text-[9px] uppercase font-bold">
                                 Regions
                               </small>
+
                               <b className="block mt-[3px] text-[11px]">
-                                {selectedRecord.regions.join(', ') || 'Not recorded'}
+                                {selectedRecord.regions.join(', ') ||
+                                  'Not recorded'}
                               </b>
                             </div>
 
@@ -648,6 +774,7 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                               <small className="block text-[#8f9bad] text-[9px] uppercase font-bold">
                                 Entity Type
                               </small>
+
                               <b className="block mt-[3px] text-[11px]">
                                 {selectedRecord.entity_type}
                               </b>
@@ -657,6 +784,7 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                               <small className="block text-[#8f9bad] text-[9px] uppercase font-bold">
                                 Affiliations
                               </small>
+
                               <b className="block mt-[3px] text-[11px]">
                                 {selectedRecord.affiliations.length}
                               </b>
@@ -666,6 +794,7 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                               <small className="block text-[#8f9bad] text-[9px] uppercase font-bold">
                                 Last Updated
                               </small>
+
                               <b className="block mt-[3px] text-[11px]">
                                 {selectedRecord.updated_at
                                   ? new Date(
@@ -682,7 +811,9 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                           </h3>
 
                           <div className="flex flex-wrap gap-[7px]">
+
                             {selectedRecord.tags.length > 0 ? (
+
                               selectedRecord.tags.map(tag => (
                                 <span
                                   key={tag}
@@ -692,11 +823,15 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                                   {tag}
                                 </span>
                               ))
+
                             ) : (
+
                               <span className="text-[11px] text-[#657084]">
                                 No tags recorded.
                               </span>
+
                             )}
+
                           </div>
 
                           <h3 className="m-[18px_0_11px] text-[12px] uppercase tracking-[0.8px] text-[#b8c2d2] font-bold">
@@ -704,7 +839,9 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                           </h3>
 
                           <div className="space-y-1.5">
+
                             {selectedRecord.rivalries.length > 0 ? (
+
                               selectedRecord.rivalries.map(riv => (
                                 <div
                                   key={riv}
@@ -714,14 +851,19 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                                   {riv}
                                 </div>
                               ))
+
                             ) : (
+
                               <span className="text-[11px] text-[#657084]">
                                 No rivalries recorded.
                               </span>
+
                             )}
+
                           </div>
 
                         </div>
+
                       </div>
                     )}
 
@@ -730,7 +872,9 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                       <div className="bg-[#171d27] border border-[#293241] rounded-[7px] p-[16px]">
 
                         <div className="flex justify-between items-start mb-3">
+
                           <div>
+
                             <h3 className="m-0 text-[12px] uppercase tracking-[0.8px] text-[#b8c2d2] font-bold">
                               Relationship network
                             </h3>
@@ -738,12 +882,18 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                             <p className="text-[10px] text-[#657084] mt-1">
                               Generated from recorded affiliations, rivalries and linked events.
                             </p>
+
                           </div>
 
-                          <Network size={16} className="text-[#5b8def]" />
+                          <Network
+                            size={16}
+                            className="text-[#5b8def]"
+                          />
+
                         </div>
 
                         {network.nodes.length > 1 ? (
+
                           <div className="h-[460px] relative overflow-hidden bg-[radial-gradient(circle_at_center,#18202d_0,#111720_48%,#10151d_100%)] border border-[#293241] rounded-[7px]">
 
                             <svg
@@ -751,14 +901,18 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                               viewBox="0 0 100 100"
                               preserveAspectRatio="none"
                             >
-                              {network.links.map((link, index) => {
-                                const sourceIndex = network.nodes.findIndex(
-                                  n => n.id === link.source
-                                );
 
-                                const targetIndex = network.nodes.findIndex(
-                                  n => n.id === link.target
-                                );
+                              {network.links.map((link, index) => {
+
+                                const sourceIndex =
+                                  network.nodes.findIndex(
+                                    n => n.id === link.source
+                                  );
+
+                                const targetIndex =
+                                  network.nodes.findIndex(
+                                    n => n.id === link.target
+                                  );
 
                                 const source =
                                   sourceIndex === 0
@@ -795,9 +949,11 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                                   />
                                 );
                               })}
+
                             </svg>
 
                             {network.nodes.map((node, index) => {
+
                               const position =
                                 index === 0
                                   ? { x: 50, y: 50 }
@@ -816,9 +972,12 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                                     left: `${position.x}%`,
                                     top: `${position.y}%`,
                                     transform: 'translate(-50%, -50%)',
-                                    maxWidth: isCore ? '190px' : '145px'
+                                    maxWidth: isCore
+                                      ? '190px'
+                                      : '145px'
                                   }}
                                 >
+
                                   <div
                                     className={`px-3 py-2 rounded-[7px] border shadow-xl text-center ${
                                       isCore
@@ -830,6 +989,7 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                                         : 'border-[#3a4a64] bg-[#182130] text-[#e7ebf2]'
                                     }`}
                                   >
+
                                     <div className="text-[9px] uppercase tracking-widest opacity-60 font-bold mb-1">
                                       {node.type === 'core'
                                         ? selectedRecord.entity_type
@@ -839,12 +999,15 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                                     <div className="text-[10px] font-bold leading-tight break-words">
                                       {node.label}
                                     </div>
+
                                   </div>
+
                                 </div>
                               );
                             })}
 
                             <div className="absolute bottom-3 left-3 flex flex-wrap gap-3 text-[9px] uppercase tracking-wider font-bold text-[#718096]">
+
                               <span className="flex items-center gap-1">
                                 <span className="w-2 h-2 rounded-full bg-[#3d659d]" />
                                 Affiliation
@@ -859,11 +1022,19 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                                 <span className="w-2 h-2 rounded-full bg-[#53647f]" />
                                 Event
                               </span>
+
                             </div>
+
                           </div>
+
                         ) : (
+
                           <div className="h-[300px] flex flex-col items-center justify-center text-center border border-[#293241] rounded-[7px] bg-[#111720]">
-                            <Network size={40} className="text-[#465267] mb-3" />
+
+                            <Network
+                              size={40}
+                              className="text-[#465267] mb-3"
+                            />
 
                             <p className="text-[12px] font-bold text-[#8f9bad]">
                               No recorded relationships
@@ -873,8 +1044,11 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                               This record does not currently contain affiliations,
                               rivalries or linked events.
                             </p>
+
                           </div>
+
                         )}
+
                       </div>
                     )}
 
@@ -883,15 +1057,18 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-[15px]">
 
                         <div className="bg-[#171d27] border border-[#293241] rounded-[7px] p-[16px]">
+
                           <h3 className="m-[0_0_14px] text-[12px] uppercase tracking-[0.8px] text-[#b8c2d2] font-bold">
                             Record information
                           </h3>
 
                           <div className="space-y-3 text-[11px]">
+
                             <div>
                               <span className="block text-[9px] uppercase font-bold text-[#657084]">
                                 Record ID
                               </span>
+
                               <span className="text-[#cbd4e2] font-mono">
                                 {selectedRecord.id}
                               </span>
@@ -901,6 +1078,7 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                               <span className="block text-[9px] uppercase font-bold text-[#657084]">
                                 Entity Type
                               </span>
+
                               <span className="text-[#cbd4e2]">
                                 {selectedRecord.entity_type}
                               </span>
@@ -910,8 +1088,10 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                               <span className="block text-[9px] uppercase font-bold text-[#657084]">
                                 Regions
                               </span>
+
                               <span className="text-[#cbd4e2]">
-                                {selectedRecord.regions.join(', ') || 'Not recorded'}
+                                {selectedRecord.regions.join(', ') ||
+                                  'Not recorded'}
                               </span>
                             </div>
 
@@ -919,6 +1099,7 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                               <span className="block text-[9px] uppercase font-bold text-[#657084]">
                                 Last Updated
                               </span>
+
                               <span className="text-[#cbd4e2]">
                                 {selectedRecord.updated_at
                                   ? new Date(
@@ -927,21 +1108,27 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                                   : 'Not recorded'}
                               </span>
                             </div>
+
                           </div>
+
                         </div>
 
                         <div className="bg-[#171d27] border border-[#293241] rounded-[7px] p-[16px]">
+
                           <h3 className="m-[0_0_14px] text-[12px] uppercase tracking-[0.8px] text-[#b8c2d2] font-bold">
                             Linked events
                           </h3>
 
                           {selectedRecord.linked_events.length > 0 ? (
+
                             <div className="space-y-2">
+
                               {selectedRecord.linked_events.map(event => (
                                 <div
                                   key={event}
                                   className="flex items-start gap-2 p-2 bg-[#111823] border border-[#293241] rounded-[5px]"
                                 >
+
                                   <CalendarDays
                                     size={13}
                                     className="text-[#5b8def] mt-0.5 shrink-0"
@@ -950,34 +1137,47 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                                   <span className="text-[11px] text-[#cbd4e2]">
                                     {event}
                                   </span>
+
                                 </div>
                               ))}
+
                             </div>
+
                           ) : (
+
                             <div className="text-[11px] text-[#657084]">
                               No linked events recorded.
                             </div>
+
                           )}
+
                         </div>
 
                       </div>
                     )}
+
                   </section>
+
                 </motion.div>
+
               ) : (
+
                 /* EMPTY STATE */
                 <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   className="min-h-[620px] flex items-center justify-center p-10"
                 >
+
                   <div className="text-center max-w-lg">
 
                     <div className="w-20 h-20 rounded-2xl bg-[#151d2b] border border-[#293241] flex items-center justify-center mx-auto mb-6">
+
                       <Database
                         size={34}
                         className="text-[#5b8def]"
                       />
+
                     </div>
 
                     <h2 className="text-[20px] font-bold text-[#e7ebf2]">
@@ -993,31 +1193,55 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-7">
 
                       <div className="bg-[#171d27] border border-[#293241] rounded-[7px] p-3">
-                        <Users size={16} className="mx-auto text-[#5b8def] mb-2" />
+
+                        <Users
+                          size={16}
+                          className="mx-auto text-[#5b8def] mb-2"
+                        />
+
                         <div className="text-[9px] uppercase tracking-wider font-bold text-[#8f9bad]">
                           Entities
                         </div>
+
                       </div>
 
                       <div className="bg-[#171d27] border border-[#293241] rounded-[7px] p-3">
-                        <MapPin size={16} className="mx-auto text-[#5b8def] mb-2" />
+
+                        <MapPin
+                          size={16}
+                          className="mx-auto text-[#5b8def] mb-2"
+                        />
+
                         <div className="text-[9px] uppercase tracking-wider font-bold text-[#8f9bad]">
                           Regions
                         </div>
+
                       </div>
 
                       <div className="bg-[#171d27] border border-[#293241] rounded-[7px] p-3">
-                        <Network size={16} className="mx-auto text-[#5b8def] mb-2" />
+
+                        <Network
+                          size={16}
+                          className="mx-auto text-[#5b8def] mb-2"
+                        />
+
                         <div className="text-[9px] uppercase tracking-wider font-bold text-[#8f9bad]">
                           Networks
                         </div>
+
                       </div>
 
                       <div className="bg-[#171d27] border border-[#293241] rounded-[7px] p-3">
-                        <Activity size={16} className="mx-auto text-[#5b8def] mb-2" />
+
+                        <Activity
+                          size={16}
+                          className="mx-auto text-[#5b8def] mb-2"
+                        />
+
                         <div className="text-[9px] uppercase tracking-wider font-bold text-[#8f9bad]">
                           Events
                         </div>
+
                       </div>
 
                     </div>
@@ -1027,8 +1251,11 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                     </div>
 
                   </div>
+
                 </motion.div>
+
               )}
+
             </AnimatePresence>
           </main>
 
@@ -1036,6 +1263,7 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
           <aside className="bg-[#121720] border border-[#293241] rounded-[8px] p-[15px] flex flex-col gap-[12px] overflow-hidden">
 
             <div className="bg-[#171d27] border border-[#293241] rounded-[7px] p-[12px] mb-2">
+
               <h3 className="text-[10px] font-bold uppercase tracking-widest text-[#5b8def] mb-3">
                 Your Intelligence Access
               </h3>
@@ -1043,11 +1271,13 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
               <div className="space-y-3">
 
                 <div>
+
                   <small className="block text-[#8f9bad] text-[9px] uppercase font-bold">
                     Authorized Regions
                   </small>
 
                   <div className="flex flex-wrap gap-1 mt-1">
+
                     {client.allowed_regions.map(region => (
                       <span
                         key={region}
@@ -1056,23 +1286,31 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                         {region}
                       </span>
                     ))}
+
                   </div>
+
                 </div>
 
                 <div>
+
                   <small className="block text-[#8f9bad] text-[9px] uppercase font-bold">
                     Account Expires
                   </small>
 
                   <b className="text-[11px] text-[#d96a73]">
-                    {new Date(client.expires_at).toLocaleDateString()}
+                    {new Date(
+                      client.expires_at
+                    ).toLocaleDateString()}
                   </b>
+
                 </div>
 
               </div>
+
             </div>
 
             <div className="flex justify-between items-center">
+
               <h3 className="m-0 text-[13px] font-bold uppercase tracking-wider text-[#b8c2d2]">
                 Search results
               </h3>
@@ -1080,11 +1318,15 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
               <span className="text-[10px] bg-[#24334d] text-[#a9c2ff] p-[4px_7px] rounded-[10px] font-bold">
                 {normalizedSearch ? filteredRecords.length : 0}
               </span>
+
             </div>
 
             {!normalizedSearch ? (
+
               <div className="flex-1 min-h-[250px] flex items-center justify-center text-center">
+
                 <div>
+
                   <Search
                     size={30}
                     className="mx-auto mb-3 text-[#3c4657]"
@@ -1095,11 +1337,17 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                     <br />
                     to view matching entities.
                   </p>
+
                 </div>
+
               </div>
+
             ) : filteredRecords.length === 0 ? (
+
               <div className="flex-1 min-h-[250px] flex items-center justify-center text-center">
+
                 <div>
+
                   <Search
                     size={28}
                     className="mx-auto mb-3 text-[#3c4657]"
@@ -1108,11 +1356,17 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                   <p className="text-[11px] text-[#657084]">
                     No matching records.
                   </p>
+
                 </div>
+
               </div>
+
             ) : (
+
               <div className="overflow-y-auto pr-1 space-y-[9px] custom-scrollbar max-h-[650px]">
+
                 {filteredRecords.map(record => (
+
                   <button
                     key={record.id}
                     onClick={() => openRecord(record.id)}
@@ -1122,7 +1376,9 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                         : 'border-[#293241] hover:border-[#456bb8]'
                     }`}
                   >
+
                     <div className="flex justify-between gap-2">
+
                       <div className="font-bold text-[#dfe6f1] group-hover:text-[#5b8def] transition-colors text-[12px]">
                         {record.title}
                       </div>
@@ -1131,6 +1387,7 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                         size={14}
                         className="text-[#465267] group-hover:text-[#5b8def] shrink-0"
                       />
+
                     </div>
 
                     <div className="text-[9px] text-[#9db5e9] mt-[5px] uppercase tracking-[0.7px] font-bold">
@@ -1138,6 +1395,7 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                     </div>
 
                     <div className="flex flex-wrap gap-1 mt-2">
+
                       {record.regions.slice(0, 2).map(region => (
                         <span
                           key={region}
@@ -1146,19 +1404,27 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
                           {region}
                         </span>
                       ))}
+
                     </div>
 
                     <p className="text-[10px] text-[#8f9bad] leading-[1.45] m-[7px_0_0] line-clamp-2">
                       {record.summary}
                     </p>
+
                   </button>
+
                 ))}
+
               </div>
+
             )}
+
           </aside>
+
         </div>
 
         <div className="mt-[15px] text-[#657084] text-[10px] flex justify-between font-semibold">
+
           <span>
             {client.name} • SECURE ACCESS PORTAL
           </span>
@@ -1167,7 +1433,9 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
             © 2026 RISK2DATA • DATA REFRESH:{' '}
             {new Date().toLocaleDateString()}
           </span>
+
         </div>
+
       </div>
 
       <style>{`
@@ -1188,6 +1456,7 @@ export default function ClientPortal({ onLogout }: ClientPortalProps) {
           background: #5b8def;
         }
       `}</style>
+
     </div>
   );
 }
