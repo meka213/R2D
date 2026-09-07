@@ -2,27 +2,29 @@ import express from "express";
 import "dotenv/config";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import { MongoClient, Db } from "mongodb";
+import { MongoClient, Db, ObjectId } from "mongodb";
 
 export interface TimelineMilestone {
   id: string;
-  date: string;
+  entity_id: string; // Target entity ID
+  date: string; // YYYY-MM-DD
   date_precision?: 'exact' | 'month' | 'year' | 'approximate';
   title: string;
   event_type: string;
-  location?: string;
-  regions?: string[];
-  formatted_location?: string;
-  duration?: string;
-  coordinates?: { lat: number; lng: number };
   description: string;
-  related_entities?: string[];
+  location?: string;
+  regions: string[];
+  coordinates?: { lat: number; lng: number };
+  source_record_id?: string; // Original R2D record ID
+  source_record_type?: string; // Original R2D record type for auth
   source?: string;
   source_date?: string;
-  confidence?: 'Verified' | 'High' | 'Moderate' | 'Reported' | string;
-  related_record_id?: string;
-  record_id?: string;
-  is_major?: boolean;
+  confidence?: string;
+  origin: 'auto' | 'manual';
+  is_major: boolean;
+  visible: boolean;
+  created_at: string;
+  updated_at: string;
   stage?: 'start' | 'development' | 'escalation' | 'turning_point' | 'de_escalation' | 'end' | 'ongoing';
 }
 
@@ -46,7 +48,7 @@ export interface RiskRecord {
   coordinates?: { lat: number; lng: number };
   source?: string;
   source_date?: string;
-  confidence?: 'Verified' | 'High' | 'Moderate' | 'Reported';
+  confidence?: string;
   chronology?: TimelineMilestone[];
 }
 
@@ -99,6 +101,14 @@ async function connectDatabase() {
     const dbName = process.env.MONGODB_DB || process.env.MONGO_DB || "intelligence_db";
     db = mongoClient.db(dbName);
     console.log(`MongoDB connected: ${dbName}`);
+
+    // Create indexes for timeline_nodes
+    const timelineCollection = db.collection("timeline_nodes");
+    await timelineCollection.createIndex({ entity_id: 1 });
+    await timelineCollection.createIndex({ date: 1 });
+    await timelineCollection.createIndex({ source_record_id: 1 });
+    await timelineCollection.createIndex({ origin: 1 });
+    console.log("Timeline indexes initialized.");
   } catch (error) {
     console.error("Failed to connect to MongoDB:", error);
     if (process.env.NODE_ENV === "production") {
@@ -109,269 +119,215 @@ async function connectDatabase() {
 
 // Helper to access the main intelligence profiles collection
 async function getProfilesCollection() {
-  return db.collection<RiskRecord>("profiles");
+  return db.collection<any>("profiles");
+}
+
+async function getTimelineCollection() {
+  return db.collection<TimelineMilestone>("timeline_nodes");
+}
+
+/**
+ * ADAPTER: Maps raw MongoDB documents to RiskRecord interface
+ * Handle _id mapping and field normalization
+ */
+function adaptRecord(raw: any): RiskRecord {
+  const id = raw._id ? raw._id.toString() : (raw.id || "");
+  return {
+    id,
+    title: raw.name || raw.title || "UNKNOWN",
+    entity_type: raw.entity_type || "Unknown",
+    regions: ["West"], // Normalized for the current Western Libya dataset
+    tags: Array.isArray(raw.tags) ? raw.tags : [],
+    affiliations: Array.isArray(raw.allies) ? raw.allies : [],
+    rivalries: Array.isArray(raw.rivalries) ? raw.rivalries : [],
+    summary: raw.summary || raw.text || "",
+    linked_events: Array.isArray(raw.linked_neo4j_nodes) ? raw.linked_neo4j_nodes : [],
+    updated_at: raw.updated_at || new Date().toISOString(),
+    dob: raw.dob,
+    start_date: raw.start_date,
+    end_date: raw.end_date,
+    is_ongoing: !!raw.is_ongoing,
+    date_precision: raw.date_precision,
+    location: raw.location,
+    coordinates: raw.coordinates,
+    source: raw.source,
+    source_date: raw.source_date,
+    confidence: raw.confidence,
+    chronology: raw.chronology
+  };
+}
+
+function getQueryId(id: string) {
+  try {
+    if (id.length === 24) {
+      return { _id: new ObjectId(id) };
+    }
+    return { _id: id };
+  } catch (e) {
+    return { _id: id };
+  }
 }
 
 
 /*
  * ============================================================
- * TIMELINE & CHRONOLOGY BUILDER LOGIC
+ * TIMELINE GENERATION ENGINE (DERIVED VIEW)
  * ============================================================
  */
 
-function formatLocationWithRegions(location?: string, regions: string[] = []): string {
-  const loc = (location || "").trim();
-  const regionStr = (regions || []).join(" / ").toUpperCase();
-  if (loc && regionStr) {
-    const city = loc.split(",")[0].trim().toUpperCase();
-    return `${city} — ${regionStr}`;
+/**
+ * Generates or refreshes automatic timeline nodes for a given entity.
+ * This does NOT delete manual nodes.
+ */
+async function refreshEntityTimeline(recordId: string) {
+  const profilesCollection = await getProfilesCollection();
+  const timelineCollection = await getTimelineCollection();
+
+  const rawRecord = await profilesCollection.findOne(getQueryId(recordId));
+
+  if (!rawRecord) return;
+
+  const record = adaptRecord(rawRecord);
+
+  // Clear existing auto nodes for this entity
+  await timelineCollection.deleteMany({
+    entity_id: record.id,
+    origin: 'auto'
+  });
+
+  const autoNodes: Omit<TimelineMilestone, "id">[] = [];
+
+  // 1. Birth/Formation - Only if explicit date exists
+  if (record.dob || record.start_date) {
+    const date = record.dob || record.start_date;
+    if (date) {
+      autoNodes.push({
+        entity_id: record.id,
+        date: date,
+        date_precision: record.date_precision || (date.length === 4 ? 'year' : date.length === 7 ? 'month' : 'exact'),
+        title: record.entity_type.toLowerCase().includes('person') ? `Birth: ${record.title}` : `Formation: ${record.title}`,
+        event_type: record.entity_type.toLowerCase().includes('person') ? 'Birth' : 'Establishment',
+        description: `Documented start for ${record.title}.`,
+        location: record.location,
+        regions: record.regions,
+        coordinates: record.coordinates,
+        source_record_id: record.id,
+        source_record_type: record.entity_type,
+        source: record.source,
+        source_date: record.source_date,
+        confidence: record.confidence,
+        origin: 'auto',
+        is_major: true,
+        visible: true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      });
+    }
   }
-  if (loc) return loc.toUpperCase();
-  if (regionStr) return regionStr;
-  return "NATIONAL THEATER";
+
+  // 2. End date / Dissolution
+  if (record.end_date) {
+    autoNodes.push({
+      entity_id: record.id,
+      date: record.end_date,
+      date_precision: 'exact',
+      title: record.entity_type.toLowerCase().includes('person') ? `Death: ${record.title}` : `Dissolution: ${record.title}`,
+      event_type: record.entity_type.toLowerCase().includes('person') ? 'Death' : 'Dissolution',
+      description: `Documented end for ${record.title}.`,
+      location: record.location,
+      regions: record.regions,
+      source_record_id: record.id,
+      source_record_type: record.entity_type,
+      origin: 'auto',
+      is_major: true,
+      visible: true,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    });
+  }
+
+  // 3. Last update - Assessment milestone
+  if (record.updated_at && !record.is_ongoing) {
+    const date = record.updated_at.split('T')[0];
+    autoNodes.push({
+      entity_id: record.id,
+      date: date,
+      date_precision: 'exact',
+      title: `Intelligence Update: ${record.title}`,
+      event_type: 'Assessment',
+      description: `Latest documented intelligence assessment for ${record.title}.`,
+      location: record.location,
+      regions: record.regions,
+      source_record_id: record.id,
+      source_record_type: record.entity_type,
+      origin: 'auto',
+      is_major: false,
+      visible: true,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    });
+  }
+
+  // Insert new auto nodes
+  if (autoNodes.length > 0) {
+    await timelineCollection.insertMany(autoNodes as any);
+  }
 }
 
-function buildTimelineForEntity(record: RiskRecord, authorizedRelated: RiskRecord[]): TimelineMilestone[] {
-  const milestones: TimelineMilestone[] = [];
-  const addedIds = new Set<string>();
+/**
+ * Filter timeline nodes based on client permissions
+ */
+async function getAuthorizedTimeline(clientId: string, entityId: string): Promise<TimelineMilestone[]> {
+  const clientsCollection = db.collection<Client>("clients");
+  const profilesCollection = await getProfilesCollection();
+  const timelineCollection = await getTimelineCollection();
 
-  const isPersonType = [
-    "Person",
-    "Commander",
-    "Militia Commander",
-    "militia_commander",
-    "person",
-    "commander"
-  ].includes(record.entity_type);
+  const client = await clientsCollection.findOne({ id: clientId });
+  if (!client) throw new Error("Client not found");
 
-  const isEventType = [
-    "Event",
-    "Conflict",
-    "Incident",
-    "War",
-    "event",
-    "conflict"
-  ].includes(record.entity_type);
-
-  // 1. Entity's primary temporal inception/birth/formation
-  if (isPersonType && record.dob) {
-    const birthId = `birth-${record.id}`;
-    milestones.push({
-      id: birthId,
-      date: record.dob,
-      date_precision: record.dob.length === 4 ? "year" : record.dob.length === 7 ? "month" : "exact",
-      title: `Birth: ${record.title}`,
-      event_type: "Birth",
-      location: record.location,
-      regions: record.regions,
-      description: `Documented date of birth for ${record.title}.`,
-      related_entities: [record.title],
-      record_id: record.id,
-      source: record.source,
-      source_date: record.dob,
-      confidence: record.confidence,
-      is_major: true,
-      stage: "start"
-    });
-    addedIds.add(birthId);
+  if (new Date(client.expires_at) < new Date()) {
+    throw new Error("Client access expired");
   }
 
-  if (record.start_date) {
-    const startId = `start-${record.id}`;
-    let eventType: TimelineMilestone["event_type"] = "Formation";
-    let title = `Establishment: ${record.title}`;
-    let desc = record.summary;
+  const rawRecord = await profilesCollection.findOne(getQueryId(entityId));
+  if (!rawRecord) return [];
 
-    if (isPersonType) {
-      eventType = "Appointment";
-      title = `Service Inception: ${record.title}`;
-      desc = `Initial documented service or appointment for ${record.title}.`;
-    } else if (isEventType) {
-      eventType = "Operational activity";
-      title = `Inception: ${record.title}`;
-      desc = `Documented start of ${record.title}. ${record.summary}`;
-    }
+  const record = adaptRecord(rawRecord);
+  
+  const hasRegionPermission = record.regions.length === 0 || record.regions.some(r => client.allowed_regions.includes(r));
+  const hasTypePermission = client.allowed_types.includes(record.entity_type);
 
-    milestones.push({
-      id: startId,
-      date: record.start_date,
-      date_precision: record.start_date.length === 4 ? "year" : record.start_date.length === 7 ? "month" : "exact",
-      title,
-      event_type: eventType,
-      location: record.location,
-      regions: record.regions,
-      description: desc,
-      related_entities: [record.title],
-      record_id: record.id,
-      source: record.source,
-      source_date: record.source_date || record.start_date,
-      confidence: record.confidence,
-      is_major: true,
-      stage: "start"
-    });
-    addedIds.add(startId);
-  }
+  if (!hasRegionPermission || !hasTypePermission) return [];
 
-  // 2. Incorporate explicit milestones from record.chronology if present
-  if (record.chronology && Array.isArray(record.chronology)) {
-    for (const item of record.chronology) {
-      let verifiedRecordId: string | undefined = undefined;
-      let isAuthorized = true;
+  const nodes = await timelineCollection.find({ 
+    entity_id: record.id,
+    visible: true 
+  }).sort({ date: 1 }).toArray();
 
-      if (item.related_record_id) {
-        const found = authorizedRelated.find(r => r.id === item.related_record_id);
-        if (found) {
-          verifiedRecordId = found.id;
-        } else {
-          // If a related record is specified but not in authorized list,
-          // we check if it refers back to the parent record itself
-          if (item.related_record_id === record.id) {
-            verifiedRecordId = record.id;
-          } else {
-            // Strict enforcement: do not show information about unauthorized related records
-            isAuthorized = false;
-          }
-        }
-      } else {
-        verifiedRecordId = record.id;
-      }
+  const authorizedNodes: TimelineMilestone[] = [];
 
-      if (isAuthorized) {
-        const mId = item.id || `chrono-${record.id}-${item.date}-${milestones.length}`;
-        if (!addedIds.has(mId)) {
-          milestones.push({
-            id: mId,
-            date: item.date,
-            date_precision: item.date_precision || (item.date.length === 4 ? "year" : item.date.length === 7 ? "month" : "exact"),
-            title: item.title,
-            event_type: item.event_type || "Security",
-            location: item.location || record.location,
-            regions: item.regions || record.regions,
-            coordinates: item.coordinates || record.coordinates,
-            description: item.description,
-            related_entities: item.related_entities || [record.title],
-            source: item.source || record.source,
-            source_date: item.source_date,
-            confidence: item.confidence || record.confidence,
-            related_record_id: verifiedRecordId,
-            record_id: verifiedRecordId,
-            is_major: !!item.is_major,
-            stage: item.stage || "development"
-          });
-          addedIds.add(mId);
-        }
+  for (const node of nodes) {
+    let sourceAuthorized = true;
+
+    // Strict cross-check for related records
+    if (node.source_record_id && node.source_record_id !== record.id) {
+      const sourceRegions = node.regions || ["West"]; // Default to West for current dataset
+      const sourceType = node.source_record_type;
+      
+      const hasSourceRegion = sourceRegions.length === 0 || sourceRegions.some(r => client.allowed_regions.includes(r));
+      const hasSourceType = !sourceType || client.allowed_types.includes(sourceType);
+      
+      if (!hasSourceRegion || !hasSourceType) {
+        sourceAuthorized = false;
       }
     }
-  }
 
-  // 3. Synthesize milestones from authorized related records
-  for (const rel of authorizedRelated) {
-    const isRelEvent = ["Event", "Conflict", "Incident", "War"].includes(rel.entity_type);
-    const isRelAffiliation = record.affiliations && record.affiliations.includes(rel.title);
-    const isRelRivalry = record.rivalries && record.rivalries.includes(rel.title);
-    const isLinkedEvent = record.linked_events && record.linked_events.includes(rel.title);
-
-    const relDate = rel.start_date || rel.source_date || (rel.updated_at ? rel.updated_at.split("T")[0] : null);
-
-    if (relDate) {
-      const relId = `rel-${rel.id}`;
-      if (!addedIds.has(relId) && !milestones.some(m => m.record_id === rel.id || m.title.includes(rel.title))) {
-        let eventType: TimelineMilestone["event_type"] = "Operational activity";
-        let stage: TimelineMilestone["stage"] = "development";
-        let title = rel.title;
-        let isMajor = false;
-
-        if (isRelEvent || isLinkedEvent) {
-          eventType = "Operational activity";
-          stage = rel.is_ongoing ? "ongoing" : (rel.end_date ? "end" : "development");
-          title = `Engagement: ${rel.title}`;
-          isMajor = true;
-        } else if (isRelAffiliation) {
-          eventType = "Affiliation";
-          title = `Command Alignment: ${rel.title}`;
-          stage = "development";
-          isMajor = true;
-        } else if (isRelRivalry) {
-          eventType = "Rivalry";
-          title = `Strategic Rivalry: ${rel.title}`;
-          stage = "development";
-          isMajor = false;
-        }
-
-        milestones.push({
-          id: relId,
-          date: relDate,
-          date_precision: rel.date_precision || (relDate.length === 4 ? "year" : relDate.length === 7 ? "month" : "exact"),
-          title,
-          event_type: eventType,
-          location: rel.location,
-          regions: rel.regions,
-          coordinates: rel.coordinates,
-          description: rel.summary,
-          related_entities: [rel.title, record.title],
-          record_id: rel.id,
-          related_record_id: rel.id,
-          source: rel.source,
-          source_date: rel.source_date,
-          confidence: rel.confidence,
-          is_major: isMajor,
-          stage
-        });
-        addedIds.add(relId);
-      }
+    if (sourceAuthorized) {
+      authorizedNodes.push(node);
     }
   }
 
-  // 4. End / Resolution / Ongoing milestones
-  if (isEventType && record.end_date) {
-    const endId = `end-${record.id}`;
-    if (!addedIds.has(endId)) {
-      milestones.push({
-        id: endId,
-        date: record.end_date,
-        date_precision: record.end_date.length === 4 ? "year" : record.end_date.length === 7 ? "month" : "exact",
-        title: `Resolution: ${record.title}`,
-        event_type: "Ceasefire / Truce",
-        location: record.location,
-        regions: record.regions,
-        description: `Operational termination or documented resolution of ${record.title}.`,
-        related_entities: [record.title],
-        record_id: record.id,
-        source: record.source,
-        source_date: record.end_date,
-        confidence: record.confidence,
-        is_major: true,
-        stage: "end"
-      });
-      addedIds.add(endId);
-    }
-  } else if (isEventType && record.is_ongoing !== false) {
-    const ongoingId = `ongoing-${record.id}`;
-    if (!addedIds.has(ongoingId)) {
-      milestones.push({
-        id: ongoingId,
-        date: record.updated_at ? record.updated_at.split("T")[0] : "2026",
-        date_precision: "year",
-        title: `Active Status: ${record.title}`,
-        event_type: "Security",
-        location: record.location,
-        regions: record.regions,
-        description: `Ongoing tactical monitoring indicates persistent operational activity and presence.`,
-        related_entities: [record.title],
-        record_id: record.id,
-        source: record.source,
-        confidence: record.confidence,
-        is_major: true,
-        stage: "ongoing"
-      });
-      addedIds.add(ongoingId);
-    }
-  }
-
-  // 5. Chronological sort (Earliest to Latest)
-  milestones.sort((a, b) => a.date.localeCompare(b.date));
-
-  return milestones;
+  return authorizedNodes;
 }
 
 async function startServer() {
@@ -399,11 +355,12 @@ async function startServer() {
    *
    * in .env
    */
-  const ADMIN_USER =
-    process.env.ADMIN_USER || "admin1";
+  const ADMIN_USER = process.env.ADMIN_USER;
+  const ADMIN_PASS = process.env.ADMIN_PASS;
 
-  const ADMIN_PASS =
-    process.env.ADMIN_PASS || "change-this-admin-password";
+  if (!ADMIN_USER || !ADMIN_PASS) {
+    console.warn("ADMIN_USER or ADMIN_PASS not set. Admin access will be disabled.");
+  }
 
   let adminSessionToken: string | null = null;
 
@@ -604,12 +561,6 @@ async function startServer() {
    * ============================================================
    * CLIENT AUTHORIZED ENTITY TIMELINE
    * ============================================================
-   * Strict Authorization Enforcement:
-   * 1. Validates client access key & expiration
-   * 2. Validates target entity matches allowed_regions & allowed_types
-   * 3. Queries related records strictly filtered by allowed_regions & allowed_types
-   * 4. Multi-region support preserved on all returned milestones
-   * 5. Logs access to access_logs audit trail
    */
 
   app.get("/api/client/records/:id/timeline", async (req, res) => {
@@ -618,9 +569,7 @@ async function startServer() {
       const { id } = req.params;
 
       if (!accessKey || typeof accessKey !== "string") {
-        return res.status(401).json({
-          error: "Missing access key"
-        });
+        return res.status(401).json({ error: "Missing access key" });
       }
 
       const clientsCollection = db.collection<Client>("clients");
@@ -629,85 +578,29 @@ async function startServer() {
       });
 
       if (!client) {
-        return res.status(401).json({
-          error: "Unauthorized"
-        });
+        return res.status(401).json({ error: "Unauthorized" });
       }
 
       if (new Date(client.expires_at) < new Date()) {
-        return res.status(403).json({
-          error: "Access expired"
-        });
+        return res.status(403).json({ error: "Access expired" });
       }
 
-      const profilesCollection = await getProfilesCollection();
-      const record = await profilesCollection.findOne({ id });
-
-      if (!record) {
-        return res.status(404).json({
-          error: "Record not found"
-        });
-      }
-
-      // Check client authorization for this target entity
-      const hasRegionAccess = (record.regions || []).some((r: string) =>
-        (client.allowed_regions || []).includes(r)
-      );
-      const hasTypeAccess = (client.allowed_types || []).includes(record.entity_type);
-
-      if (!hasRegionAccess || !hasTypeAccess) {
-        return res.status(403).json({
-          error: "Unauthorized: Record outside client analytical clearance"
-        });
-      }
-
-      // Fetch related records that match the client's authorization ONLY
-      const authorizedRelated = await profilesCollection
-        .find({
-          id: { $ne: record.id },
-          regions: { $in: client.allowed_regions || [] },
-          entity_type: { $in: client.allowed_types || [] },
-          $or: [
-            { linked_events: record.title },
-            { affiliations: record.title },
-            { rivalries: record.title },
-            { title: { $in: [...(record.linked_events || []), ...(record.affiliations || []), ...(record.rivalries || [])] } },
-            { id: { $in: (record.chronology || []).map((c: TimelineMilestone) => c.related_record_id).filter(Boolean) } }
-          ]
-        })
-        .toArray();
-
-      const milestones = buildTimelineForEntity(record, authorizedRelated);
+      const milestones = await getAuthorizedTimeline(client.id, id);
 
       // Audit log entry
       await db.collection<AccessLog>("access_logs").insertOne({
         id: `LOG-${Date.now()}`,
         client_id: client.id,
         client_name: client.name,
-        action: `Timeline Access: ${record.id}`,
-        regions: record.regions,
+        action: `Timeline Access: ${id}`,
+        regions: [], // Will be populated by the record's actual regions if needed
         timestamp: new Date().toISOString()
       });
 
-      res.json({
-        entity: {
-          id: record.id,
-          title: record.title,
-          entity_type: record.entity_type,
-          regions: record.regions,
-          location: record.location,
-          dob: record.dob,
-          start_date: record.start_date,
-          end_date: record.end_date,
-          is_ongoing: record.is_ongoing
-        },
-        milestones
-      });
+      res.json({ milestones });
     } catch (error) {
       console.error("Client timeline error:", error);
-      res.status(500).json({
-        error: "Failed to build entity timeline"
-      });
+      res.status(500).json({ error: "Failed to build entity timeline" });
     }
   });
 
@@ -721,49 +614,137 @@ async function startServer() {
     try {
       const { id } = req.params;
       const profilesCollection = await getProfilesCollection();
-      const record = await profilesCollection.findOne({ id });
+      const timelineCollection = await getTimelineCollection();
 
-      if (!record) {
-        return res.status(404).json({
-          error: "Record not found"
-        });
+      const rawRecord = await profilesCollection.findOne(getQueryId(id));
+
+      if (!rawRecord) {
+        return res.status(404).json({ error: "Record not found" });
       }
 
-      // Admin has full operational visibility
-      const allRelated = await profilesCollection
-        .find({
-          id: { $ne: record.id },
-          $or: [
-            { linked_events: record.title },
-            { affiliations: record.title },
-            { rivalries: record.title },
-            { title: { $in: [...(record.linked_events || []), ...(record.affiliations || []), ...(record.rivalries || [])] } },
-            { id: { $in: (record.chronology || []).map((c: TimelineMilestone) => c.related_record_id).filter(Boolean) } }
-          ]
-        })
-        .toArray();
+      const record = adaptRecord(rawRecord);
 
-      const milestones = buildTimelineForEntity(record, allRelated);
+      // Refresh auto nodes before returning
+      await refreshEntityTimeline(record.id);
+
+      const milestones = await timelineCollection.find({ 
+        entity_id: record.id 
+      }).sort({ date: 1 }).toArray();
 
       res.json({
-        entity: {
-          id: record.id,
-          title: record.title,
-          entity_type: record.entity_type,
-          regions: record.regions,
-          location: record.location,
-          dob: record.dob,
-          start_date: record.start_date,
-          end_date: record.end_date,
-          is_ongoing: record.is_ongoing
-        },
+        entity: record,
         milestones
       });
     } catch (error) {
       console.error("Admin timeline error:", error);
-      res.status(500).json({
-        error: "Failed to build entity timeline"
+      res.status(500).json({ error: "Failed to retrieve timeline" });
+    }
+  });
+
+  /*
+   * MANUALLY ADD TIMELINE NODE
+   */
+  app.post("/api/admin/records/:id/timeline", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const nodeData = req.body;
+      const timelineCollection = await getTimelineCollection();
+
+      const newNode: TimelineMilestone = {
+        ...nodeData,
+        id: `TL-MAN-${Date.now()}`,
+        entity_id: id,
+        origin: 'manual',
+        visible: nodeData.visible !== false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+
+      await timelineCollection.insertOne(newNode);
+
+      // Audit log
+      await db.collection<AccessLog>("access_logs").insertOne({
+        id: `LOG-ADM-${Date.now()}`,
+        client_id: "ADMIN",
+        client_name: "ADMINISTRATOR",
+        action: `Manual Timeline Node Added: ${id}`,
+        regions: [],
+        timestamp: new Date().toISOString()
       });
+
+      res.status(201).json(newNode);
+    } catch (error) {
+      console.error("Add timeline node error:", error);
+      res.status(500).json({ error: "Failed to add timeline node" });
+    }
+  });
+
+  /*
+   * EDIT TIMELINE NODE
+   */
+  app.put("/api/admin/timeline/:timelineId", async (req, res) => {
+    try {
+      const { timelineId } = req.params;
+      const updateData = req.body;
+      const timelineCollection = await getTimelineCollection();
+
+      const existing = await timelineCollection.findOne({ id: timelineId });
+      if (!existing) return res.status(404).json({ error: "Node not found" });
+
+      const updated = {
+        ...existing,
+        ...updateData,
+        updated_at: new Date().toISOString()
+      };
+
+      await timelineCollection.replaceOne({ id: timelineId }, updated);
+
+      res.json(updated);
+    } catch (error) {
+      console.error("Update timeline node error:", error);
+      res.status(500).json({ error: "Failed to update node" });
+    }
+  });
+
+  /*
+   * DELETE TIMELINE NODE
+   */
+  app.delete("/api/admin/timeline/:timelineId", async (req, res) => {
+    try {
+      const { timelineId } = req.params;
+      const timelineCollection = await getTimelineCollection();
+
+      const existing = await timelineCollection.findOne({ id: timelineId });
+      if (existing?.origin === 'auto') {
+        return res.status(403).json({ error: "Cannot delete automatic nodes. Hide them instead." });
+      }
+
+      await timelineCollection.deleteOne({ id: timelineId });
+      res.json({ message: "Node deleted" });
+    } catch (error) {
+      console.error("Delete timeline node error:", error);
+      res.status(500).json({ error: "Failed to delete node" });
+    }
+  });
+
+  /*
+   * PATCH VISIBILITY
+   */
+  app.patch("/api/admin/timeline/:timelineId/visibility", async (req, res) => {
+    try {
+      const { timelineId } = req.params;
+      const { visible } = req.body;
+      const timelineCollection = await getTimelineCollection();
+
+      await timelineCollection.updateOne(
+        { id: timelineId },
+        { $set: { visible: !!visible, updated_at: new Date().toISOString() } }
+      );
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Visibility toggle error:", error);
+      res.status(500).json({ error: "Failed to toggle visibility" });
     }
   });
 
@@ -858,7 +839,7 @@ async function startServer() {
       };
 
       await db
-        .collection<DemoRequest>("demoRequests")
+        .collection<DemoRequest>("demo_requests")
         .insertOne(newRequest);
 
       res.status(201).json({
@@ -924,76 +905,46 @@ async function startServer() {
         end_date,
         location,
         source,
-        confidence,
-        chronology
+        confidence
       } = req.body;
 
-      const now =
-        new Date().toISOString();
+      const now = new Date().toISOString();
+      const profilesCollection = await getProfilesCollection();
 
-      const newRecord: RiskRecord = {
-        id: `R2D-${Math.floor(
-          1000 + Math.random() * 9000
-        )}`,
-        title,
+      // Use production field names for insertion
+      const newDoc = {
+        name: title,
         entity_type,
-
-        regions: Array.isArray(regions)
-          ? regions
-          : regions
-          ? [regions]
-          : [],
-
-        tags:
-          typeof tags === "string"
-            ? tags
-                .split(",")
-                .map(t => t.trim())
-                .filter(Boolean)
-            : Array.isArray(tags)
-            ? tags
-            : [],
-
-        affiliations:
-          Array.isArray(affiliations)
-            ? affiliations
-            : [],
-
-        rivalries:
-          Array.isArray(rivalries)
-            ? rivalries
-            : [],
-
         summary: summary || "",
-
-        linked_events:
-          Array.isArray(linked_events)
-            ? linked_events
-            : [],
-
+        text: summary || "",
+        allies: Array.isArray(affiliations) ? affiliations : [],
+        rivalries: Array.isArray(rivalries) ? rivalries : [],
+        linked_neo4j_nodes: Array.isArray(linked_events) ? linked_events : [],
+        updated_at: now,
         dob,
         start_date,
         end_date,
         location,
         source,
+        source_date: req.body.source_date,
         confidence,
-        chronology: Array.isArray(chronology) ? chronology : undefined,
-
-        updated_at: now
+        tags: Array.isArray(tags) ? tags : []
       };
 
-      await db.collection<RiskRecord>("profiles").insertOne(newRecord);
+      const result = await profilesCollection.insertOne(newDoc);
+      const responseRecord = adaptRecord({ ...newDoc, _id: result.insertedId });
 
-      res.status(201).json(newRecord);
+      // Auto-generate timeline for the new record
+      try {
+        await refreshEntityTimeline(responseRecord.id);
+      } catch (e) {
+        console.error("Initial timeline refresh failed:", e);
+      }
+
+      res.status(201).json(responseRecord);
     } catch (error) {
-      console.error(
-        "Create record error:",
-        error
-      );
-
-      res.status(500).json({
-        error: "Failed to create record"
-      });
+      console.error("Create record error:", error);
+      res.status(500).json({ error: "Failed to create record" });
     }
   });
 
@@ -1004,15 +955,12 @@ async function startServer() {
   app.put("/api/admin/records/:id", async (req, res) => {
     try {
       const { id } = req.params;
-
       const {
         title,
         entity_type,
-        regions,
-        tags,
+        summary,
         affiliations,
         rivalries,
-        summary,
         linked_events,
         dob,
         start_date,
@@ -1020,97 +968,48 @@ async function startServer() {
         location,
         source,
         confidence,
-        chronology
+        tags
       } = req.body;
 
       const profilesCollection = await getProfilesCollection();
-
-      const existing =
-        await profilesCollection.findOne({ id });
+      const existing = await profilesCollection.findOne(getQueryId(id));
 
       if (!existing) {
-        return res.status(404).json({
-          error: "Record not found"
-        });
+        return res.status(404).json({ error: "Record not found" });
       }
 
-      const updatedRecord: RiskRecord = {
+      const updatedDoc = {
         ...existing,
-
-        title:
-          title !== undefined
-            ? title
-            : existing.title,
-
-        entity_type:
-          entity_type !== undefined
-            ? entity_type
-            : existing.entity_type,
-
-        regions:
-          Array.isArray(regions)
-            ? regions
-            : regions
-            ? [regions]
-            : existing.regions,
-
-        tags:
-          typeof tags === "string"
-            ? tags
-                .split(",")
-                .map(t => t.trim())
-                .filter(Boolean)
-            : Array.isArray(tags)
-            ? tags
-            : existing.tags,
-
-        affiliations:
-          Array.isArray(affiliations)
-            ? affiliations
-            : existing.affiliations,
-
-        rivalries:
-          Array.isArray(rivalries)
-            ? rivalries
-            : existing.rivalries,
-
-        summary:
-          summary !== undefined
-            ? summary
-            : existing.summary,
-
-        linked_events:
-          Array.isArray(linked_events)
-            ? linked_events
-            : existing.linked_events,
-
+        name: title !== undefined ? title : existing.name,
+        entity_type: entity_type !== undefined ? entity_type : existing.entity_type,
+        summary: summary !== undefined ? summary : existing.summary,
+        text: summary !== undefined ? summary : existing.text,
+        allies: Array.isArray(affiliations) ? affiliations : existing.allies,
+        rivalries: Array.isArray(rivalries) ? rivalries : existing.rivalries,
+        linked_neo4j_nodes: Array.isArray(linked_events) ? linked_events : existing.linked_neo4j_nodes,
+        updated_at: new Date().toISOString(),
         dob: dob !== undefined ? dob : existing.dob,
         start_date: start_date !== undefined ? start_date : existing.start_date,
         end_date: end_date !== undefined ? end_date : existing.end_date,
         location: location !== undefined ? location : existing.location,
         source: source !== undefined ? source : existing.source,
         confidence: confidence !== undefined ? confidence : existing.confidence,
-        chronology: chronology !== undefined ? chronology : existing.chronology,
-
-        updated_at:
-          new Date().toISOString()
+        tags: Array.isArray(tags) ? tags : existing.tags
       };
 
-      await db.collection<RiskRecord>("profiles").replaceOne(
-        { id },
-        updatedRecord
-      );
+      await profilesCollection.replaceOne(getQueryId(id), updatedDoc);
 
-      res.json(updatedRecord);
+      // Refresh timeline to reflect updates
+      try {
+        await refreshEntityTimeline(id);
+      } catch (e) {
+        console.error("Timeline refresh on update failed:", e);
+      }
+
+      res.json(adaptRecord({ ...updatedDoc, _id: existing._id }));
     } catch (error) {
-      console.error(
-        "Update record error:",
-        error
-      );
-
-      res.status(500).json({
-        error: "Failed to update record"
-      });
+      console.error("Update record error:", error);
+      res.status(500).json({ error: "Failed to update record" });
     }
   });
 
@@ -1121,27 +1020,21 @@ async function startServer() {
   app.delete("/api/admin/records/:id", async (req, res) => {
     try {
       const { id } = req.params;
+      const profilesCollection = await getProfilesCollection();
 
-      const pRes = await db.collection<RiskRecord>("profiles").deleteOne({ id });
+      const pRes = await profilesCollection.deleteOne(getQueryId(id));
 
       if (pRes.deletedCount === 0) {
-        return res.status(404).json({
-          error: "Record not found"
-        });
+        return res.status(404).json({ error: "Record not found" });
       }
 
-      res.json({
-        message: "Record deleted"
-      });
-    } catch (error) {
-      console.error(
-        "Delete record error:",
-        error
-      );
+      // Cleanup timeline nodes
+      await (await getTimelineCollection()).deleteMany({ entity_id: id });
 
-      res.status(500).json({
-        error: "Failed to delete record"
-      });
+      res.json({ message: "Record deleted" });
+    } catch (error) {
+      console.error("Delete record error:", error);
+      res.status(500).json({ error: "Failed to delete record" });
     }
   });
 
@@ -1157,7 +1050,7 @@ async function startServer() {
       try {
         const requests =
           await db
-            .collection<DemoRequest>("demoRequests")
+            .collection<DemoRequest>("demo_requests")
             .find({})
             .sort({ timestamp: -1 })
             .toArray();
@@ -1183,7 +1076,7 @@ async function startServer() {
         const { id } = req.params;
 
         await db
-          .collection<DemoRequest>("demoRequests")
+          .collection<DemoRequest>("demo_requests")
           .deleteOne({ id });
 
         res.json({

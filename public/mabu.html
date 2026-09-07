@@ -404,6 +404,82 @@
         </div>
     </div>
 
+    <!-- Timeline Editor Overlay -->
+    <div id="timeline-overlay" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); display: none; justify-content: center; align-items: center; z-index: 1100; padding: 2rem;">
+        <div class="card" style="width: 100%; max-width: 1200px; max-height: 90vh; overflow-y: auto; display: flex; flex-direction: column; background: var(--panel);">
+            <div class="inventory-header" style="margin-bottom: 1.5rem;">
+                <h2 id="timeline-editor-title">ENTITY TIMELINE EDITOR</h2>
+                <div style="display: flex; gap: 1rem;">
+                    <button class="action-btn edit-btn" onclick="refreshTimeline()" style="color: var(--accent)">REGENERATE AUTO NODES</button>
+                    <button class="action-btn delete-btn" onclick="closeTimelineEditor()">CLOSE</button>
+                </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;">
+                <!-- Add Node Form -->
+                <div>
+                    <h3 style="font-size: 0.9rem; margin-bottom: 1rem; color: var(--accent);">ADD MANUAL NODE</h3>
+                    <form id="timeline-node-form" style="display: flex; flex-direction: column; gap: 1rem;">
+                        <input type="hidden" id="edit-node-id">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                            <div class="form-group">
+                                <label>Date (YYYY-MM-DD)</label>
+                                <input type="text" id="node-date" required placeholder="2024-05-12">
+                            </div>
+                            <div class="form-group">
+                                <label>Event Type</label>
+                                <input type="text" id="node-type" required placeholder="Security Incident">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Title</label>
+                            <input type="text" id="node-title" required placeholder="Brief title of the event">
+                        </div>
+                        <div class="form-group">
+                            <label>Description</label>
+                            <textarea id="node-desc" required placeholder="Detailed description of the development..."></textarea>
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                            <div class="form-group">
+                                <label>Location</label>
+                                <input type="text" id="node-location" placeholder="Tripoli, Libya">
+                            </div>
+                            <div class="form-group">
+                                <label>Confidence</label>
+                                <select id="node-confidence">
+                                    <option value="Verified">Verified</option>
+                                    <option value="High">High</option>
+                                    <option value="Moderate">Moderate</option>
+                                    <option value="Reported">Reported</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div style="display: flex; gap: 1.5rem;">
+                            <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem;">
+                                <input type="checkbox" id="node-major"> Major Milestone
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem;">
+                                <input type="checkbox" id="node-visible" checked> Publicly Visible
+                            </label>
+                        </div>
+                        <div class="btn-group">
+                            <button type="submit" class="btn-primary" id="node-save-btn">SAVE NODE</button>
+                            <button type="button" class="btn-secondary" onclick="resetNodeForm()">CANCEL</button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Node List -->
+                <div style="border-left: 1px solid var(--border); padding-left: 2rem;">
+                    <h3 style="font-size: 0.9rem; margin-bottom: 1rem; color: var(--accent);">TIMELINE PREVIEW & MANAGEMENT</h3>
+                    <div id="node-list" style="display: flex; flex-direction: column; gap: 1rem; max-height: 60vh; overflow-y: auto;">
+                        <!-- Nodes injected here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     </div> <!-- End admin-content -->
 
     <script>
@@ -648,6 +724,7 @@
                     </div>
                     <div class="actions">
                         <button class="action-btn edit-btn" onclick="editRecord('${r.id}')">EDIT</button>
+                        <button class="action-btn edit-btn" style="color: var(--accent)" onclick="openTimelineEditor('${r.id}')">TIMELINE</button>
                         <button class="action-btn delete-btn" onclick="deleteRecord('${r.id}')">DELETE</button>
                     </div>
                 </div>
@@ -875,6 +952,172 @@
             }
 
             logOverlay.style.display = 'flex';
+        }
+
+        // ==========================================
+        // TIMELINE EDITOR LOGIC
+        // ==========================================
+        let currentTimelineEntityId = null;
+        let currentTimelineNodes = [];
+
+        async function openTimelineEditor(id) {
+            currentTimelineEntityId = id;
+            const record = allRecords.find(r => r.id === id);
+            document.getElementById('timeline-editor-title').textContent = `TIMELINE EDITOR: ${record ? record.title : id}`;
+            document.getElementById('timeline-overlay').style.display = 'flex';
+            resetNodeForm();
+            await fetchTimelineNodes();
+        }
+
+        function closeTimelineEditor() {
+            document.getElementById('timeline-overlay').style.display = 'none';
+            currentTimelineEntityId = null;
+            currentTimelineNodes = [];
+        }
+
+        async function fetchTimelineNodes() {
+            try {
+                const res = await adminFetch(`/api/admin/records/${currentTimelineEntityId}/timeline`);
+                const data = await res.json();
+                currentTimelineNodes = data.milestones;
+                renderTimelineNodes();
+            } catch (err) {
+                showStatus('Failed to load timeline', 'error');
+            }
+        }
+
+        function renderTimelineNodes() {
+            const list = document.getElementById('node-list');
+            list.innerHTML = currentTimelineNodes.map(node => `
+                <div class="log-item" style="border-left: 4px solid ${node.origin === 'auto' ? 'var(--accent)' : 'var(--success)'}; opacity: ${node.visible ? 1 : 0.6}">
+                    <div style="display: flex; justify-content: space-between; align-items: start;">
+                        <div>
+                            <span class="log-badge" style="background: ${node.origin === 'auto' ? 'var(--accent)' : 'var(--success)'}">${node.origin.toUpperCase()}</span>
+                            ${node.is_major ? '<span class="log-badge" style="background: #f39c12; margin-left: 4px;">MAJOR</span>' : ''}
+                            <h4 style="margin: 0.5rem 0 0.25rem 0; font-size: 1rem;">${node.title}</h4>
+                        </div>
+                        <div style="text-align: right;">
+                            <div style="font-size: 0.8rem; font-weight: 800;">${node.date}</div>
+                            <div style="font-size: 0.7rem; color: var(--muted);">${node.event_type}</div>
+                        </div>
+                    </div>
+                    <p style="font-size: 0.85rem; margin: 0.5rem 0; color: var(--text-dim); line-height: 1.4;">${node.description}</p>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem;">
+                        <span style="font-size: 0.7rem; color: var(--muted);">📍 ${node.location || 'Unknown Location'}</span>
+                        <div class="actions" style="margin: 0; transform: scale(0.85); transform-origin: right;">
+                            <button class="action-btn edit-btn" onclick="toggleNodeVisibility('${node.id}', ${!node.visible})">${node.visible ? 'HIDE' : 'SHOW'}</button>
+                            ${node.origin === 'manual' ? `
+                                <button class="action-btn edit-btn" onclick="prepareNodeEdit('${node.id}')">EDIT</button>
+                                <button class="action-btn delete-btn" onclick="deleteTimelineNode('${node.id}')">DELETE</button>
+                            ` : ''}
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+
+            if (currentTimelineNodes.length === 0) {
+                list.innerHTML = '<div style="text-align: center; color: var(--muted); padding: 2rem;">No timeline nodes generated yet.</div>';
+            }
+        }
+
+        async function refreshTimeline() {
+            if (!confirm('This will update all automatic nodes based on the latest record data. Manual nodes will be preserved. Proceed?')) return;
+            try {
+                const res = await adminFetch(`/api/admin/records/${currentTimelineEntityId}/timeline`, {
+                    method: 'GET'
+                });
+                if (res.ok) {
+                    showStatus('Timeline refreshed', 'success');
+                    await fetchTimelineNodes();
+                }
+            } catch (err) {
+                showStatus('Failed to refresh', 'error');
+            }
+        }
+
+        document.getElementById('timeline-node-form').onsubmit = async (e) => {
+            e.preventDefault();
+            const id = document.getElementById('edit-node-id').value;
+            const data = {
+                date: document.getElementById('node-date').value,
+                event_type: document.getElementById('node-type').value,
+                title: document.getElementById('node-title').value,
+                description: document.getElementById('node-desc').value,
+                location: document.getElementById('node-location').value,
+                confidence: document.getElementById('node-confidence').value,
+                is_major: document.getElementById('node-major').checked,
+                visible: document.getElementById('node-visible').checked,
+                regions: allRecords.find(r => r.id === currentTimelineEntityId)?.regions || []
+            };
+
+            const url = id ? `/api/admin/timeline/${id}` : `/api/admin/records/${currentTimelineEntityId}/timeline`;
+            const method = id ? 'PUT' : 'POST';
+
+            try {
+                const res = await adminFetch(url, {
+                    method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                if (res.ok) {
+                    showStatus(id ? 'Node updated' : 'Node added', 'success');
+                    resetNodeForm();
+                    await fetchTimelineNodes();
+                }
+            } catch (err) {
+                showStatus('Failed to save node', 'error');
+            }
+        };
+
+        function prepareNodeEdit(nodeId) {
+            const node = currentTimelineNodes.find(n => n.id === nodeId);
+            if (!node) return;
+
+            document.getElementById('edit-node-id').value = node.id;
+            document.getElementById('node-date').value = node.date;
+            document.getElementById('node-type').value = node.event_type;
+            document.getElementById('node-title').value = node.title;
+            document.getElementById('node-desc').value = node.description;
+            document.getElementById('node-location').value = node.location || '';
+            document.getElementById('node-confidence').value = node.confidence || 'High';
+            document.getElementById('node-major').checked = !!node.is_major;
+            document.getElementById('node-visible').checked = !!node.visible;
+            
+            document.getElementById('node-save-btn').textContent = 'UPDATE NODE';
+        }
+
+        function resetNodeForm() {
+            document.getElementById('timeline-node-form').reset();
+            document.getElementById('edit-node-id').value = '';
+            document.getElementById('node-save-btn').textContent = 'SAVE NODE';
+        }
+
+        async function deleteTimelineNode(nodeId) {
+            if (!confirm('Are you sure you want to delete this manual node?')) return;
+            try {
+                const res = await adminFetch(`/api/admin/timeline/${nodeId}`, { method: 'DELETE' });
+                if (res.ok) {
+                    showStatus('Node deleted', 'success');
+                    await fetchTimelineNodes();
+                }
+            } catch (err) {
+                showStatus('Failed to delete', 'error');
+            }
+        }
+
+        async function toggleNodeVisibility(nodeId, visible) {
+            try {
+                const res = await adminFetch(`/api/admin/timeline/${nodeId}/visibility`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ visible })
+                });
+                if (res.ok) {
+                    await fetchTimelineNodes();
+                }
+            } catch (err) {
+                showStatus('Failed to toggle visibility', 'error');
+            }
         }
 
         function closeLogModal() {

@@ -139,8 +139,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
     };
   }, [record.id, clientAccessKey]);
 
-  // Assemble milestones: use server-validated milestones if available,
-  // or build dynamically from the authorized record data
+  // Assemble milestones: use server-validated milestones if available
   const rawMilestones: TimelineMilestone[] = useMemo(() => {
     if (serverMilestones && serverMilestones.length > 0) {
       return serverMilestones;
@@ -150,199 +149,8 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
       return record.chronology;
     }
 
-    // Dynamic synthesis based on authentic fields in RiskRecord and authorized records
-    const synthesized: TimelineMilestone[] = [];
-    const addedIds = new Set<string>();
-
-    if (isPerson && record.dob) {
-      const bId = `synth-${record.id}-birth`;
-      synthesized.push({
-        id: bId,
-        date: record.dob,
-        date_precision: record.dob.length === 4 ? 'year' : 'exact',
-        title: `Birth of ${record.title}`,
-        event_type: 'Birth',
-        location: record.location || 'Libya',
-        regions: record.regions,
-        description: `Earliest documented civil and biographical anchor for ${record.title}.`,
-        related_entities: [record.title],
-        source: record.source || 'Civil Registry Archive',
-        source_date: record.dob,
-        confidence: record.confidence || 'Verified',
-        record_id: record.id,
-        is_major: true,
-        stage: 'start'
-      });
-      addedIds.add(bId);
-    }
-
-    if (record.start_date) {
-      const sId = `synth-${record.id}-start`;
-      let eventType: TimelineMilestone['event_type'] = 'Formation';
-      let title = `Formation / Establishment of ${record.title}`;
-      let desc = record.summary;
-
-      if (isPerson) {
-        eventType = 'Appointment';
-        title = `Documented Service Inception: ${record.title}`;
-        desc = `Initial documented institutional command appointment and service for ${record.title}.`;
-      } else if (isEvent) {
-        eventType = 'Clash / Conflict';
-        title = `Outbreak / Start of ${record.title}`;
-        desc = `Initial tactical mobilization and outbreak for ${record.title}. ${record.summary}`;
-      }
-
-      synthesized.push({
-        id: sId,
-        date: record.start_date,
-        date_precision: record.start_date.length === 4 ? 'year' : 'exact',
-        title,
-        event_type: eventType,
-        location: record.location || 'Libya',
-        regions: record.regions,
-        coordinates: record.coordinates,
-        description: desc,
-        related_entities: [record.title],
-        source: record.source || 'Intelligence Dossier',
-        source_date: record.source_date || record.start_date,
-        confidence: record.confidence || 'Verified',
-        record_id: record.id,
-        is_major: true,
-        stage: 'start'
-      });
-      addedIds.add(sId);
-    }
-
-    // Synthesize from authorized linked events
-    if (record.linked_events && record.linked_events.length > 0) {
-      record.linked_events.forEach((evtName, idx) => {
-        const matched = allRecords.find(r => r.title.toLowerCase() === evtName.toLowerCase());
-        const eventDate = matched?.start_date || (record.updated_at ? record.updated_at.split('T')[0] : '2023');
-        const evtId = `synth-${record.id}-evt-${idx}`;
-        if (!addedIds.has(evtId)) {
-          synthesized.push({
-            id: evtId,
-            date: eventDate,
-            date_precision: eventDate.length === 4 ? 'year' : 'exact',
-            title: `Engagement: ${evtName}`,
-            event_type: 'Clash / Conflict',
-            location: matched?.location || record.location || 'Tripoli',
-            regions: matched?.regions || record.regions,
-            coordinates: matched?.coordinates || record.coordinates,
-            description: matched?.summary || `Operational involvement and security developments recorded in connection with ${evtName}.`,
-            related_entities: [evtName, record.title],
-            source: matched?.source || record.source || 'Field Intelligence Dossier',
-            source_date: matched?.source_date,
-            confidence: matched?.confidence || 'High',
-            related_record_id: matched?.id,
-            record_id: matched?.id,
-            is_major: true,
-            stage: 'escalation'
-          });
-          addedIds.add(evtId);
-        }
-      });
-    }
-
-    // Affiliations
-    if (record.affiliations && record.affiliations.length > 0) {
-      record.affiliations.forEach((affName, idx) => {
-        const matched = allRecords.find(r => r.title.toLowerCase() === affName.toLowerCase());
-        const affDate = matched?.start_date || '2016';
-        const affId = `synth-${record.id}-aff-${idx}`;
-        if (!addedIds.has(affId)) {
-          synthesized.push({
-            id: affId,
-            date: affDate,
-            date_precision: 'year',
-            title: `Command Alignment: ${affName}`,
-            event_type: 'Affiliation',
-            location: matched?.location || record.location || 'Tripoli',
-            regions: matched?.regions || record.regions,
-            description: `Documented strategic alliance and operational coordination with ${affName}.`,
-            related_entities: [affName, record.title],
-            source: 'Strategic Coalition Assessment',
-            confidence: 'High',
-            related_record_id: matched?.id,
-            record_id: matched?.id,
-            is_major: true,
-            stage: 'development'
-          });
-          addedIds.add(affId);
-        }
-      });
-    }
-
-    // Rivalries
-    if (record.rivalries && record.rivalries.length > 0) {
-      record.rivalries.forEach((rivName, idx) => {
-        const matched = allRecords.find(r => r.title.toLowerCase() === rivName.toLowerCase());
-        const rivDate = matched?.start_date || '2019';
-        const rivId = `synth-${record.id}-riv-${idx}`;
-        if (!addedIds.has(rivId)) {
-          synthesized.push({
-            id: rivId,
-            date: rivDate,
-            date_precision: 'year',
-            title: `Friction & Strategic Rivalry: ${rivName}`,
-            event_type: 'Rivalry',
-            location: matched?.location || record.location || 'Tripoli',
-            regions: matched?.regions || record.regions,
-            description: `Active military, territorial, or political contestation with ${rivName}.`,
-            related_entities: [rivName, record.title],
-            source: 'Threat Horizon Monitor',
-            confidence: 'Moderate',
-            related_record_id: matched?.id,
-            record_id: matched?.id,
-            is_major: false,
-            stage: 'escalation'
-          });
-          addedIds.add(rivId);
-        }
-      });
-    }
-
-    // End date or ongoing resolution
-    if (isEvent && record.end_date) {
-      const endId = `synth-${record.id}-end`;
-      synthesized.push({
-        id: endId,
-        date: record.end_date,
-        date_precision: record.end_date.length === 4 ? 'year' : 'exact',
-        title: `Resolution / Conclusion of ${record.title}`,
-        event_type: 'Ceasefire / Truce',
-        location: record.location || 'Libya',
-        regions: record.regions,
-        description: `Formal conclusion, ceasefire ratification, or operational termination reached for ${record.title}.`,
-        related_entities: [record.title],
-        source: record.source || 'Peace Agreement Registry',
-        confidence: record.confidence || 'Verified',
-        record_id: record.id,
-        is_major: true,
-        stage: 'end'
-      });
-    } else if (isEvent && record.is_ongoing !== false) {
-      const ongoingId = `synth-${record.id}-ongoing`;
-      synthesized.push({
-        id: ongoingId,
-        date: record.updated_at ? record.updated_at.split('T')[0] : '2026',
-        date_precision: 'year',
-        title: `Active Conflict Status: ${record.title}`,
-        event_type: 'Security',
-        location: record.location || 'Libya',
-        regions: record.regions,
-        description: `Continuous tactical monitoring indicates unresolved active friction and armed deployment.`,
-        related_entities: [record.title],
-        source: 'Real-Time Conflict Monitor',
-        confidence: 'High',
-        record_id: record.id,
-        is_major: true,
-        stage: 'ongoing'
-      });
-    }
-
-    return synthesized;
-  }, [serverMilestones, record, allRecords, isPerson, isGroup, isEvent]);
+    return [];
+  }, [serverMilestones, record]);
 
   // Sort milestones
   const sortedMilestones = useMemo(() => {
@@ -375,9 +183,8 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
         const inTitle = m.title.toLowerCase().includes(query);
         const inDesc = m.description.toLowerCase().includes(query);
         const inLoc = m.location ? m.location.toLowerCase().includes(query) : false;
-        const inRel = m.related_entities ? m.related_entities.some(e => e.toLowerCase().includes(query)) : false;
         const inSrc = m.source ? m.source.toLowerCase().includes(query) : false;
-        if (!inTitle && !inDesc && !inLoc && !inRel && !inSrc) return false;
+        if (!inTitle && !inDesc && !inLoc && !inSrc) return false;
       }
 
       return true;
@@ -923,7 +730,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
                 {milestones.map(milestone => {
                   const badge = getTypeBadge(milestone.event_type);
                   const isExpanded = expandedMilestones.has(milestone.id);
-                  const recordLink = milestone.related_record_id || milestone.record_id;
+                  const recordLink = milestone.source_record_id || milestone.entity_id;
 
                   return (
                     <div
@@ -993,41 +800,20 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
 
                       {/* Related Entities and Action Row */}
                       <div className="mt-3 pt-2.5 border-t border-[#222a36] flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-                        {/* Associated Entities */}
+                        {/* Associated Metadata */}
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          {milestone.related_entities && milestone.related_entities.length > 0 ? (
-                            <>
-                              <span className="text-[9px] uppercase font-bold text-[#657084] mr-0.5">
-                                Associated:
-                              </span>
-                              {milestone.related_entities.map(entityName => {
-                                const matchedRecord = allRecords.find(
-                                  r => r.title.toLowerCase() === entityName.toLowerCase()
-                                );
-                                return (
-                                  <button
-                                    key={entityName}
-                                    onClick={() => {
-                                      if (matchedRecord && onSelectRecord) {
-                                        onSelectRecord(matchedRecord.id);
-                                      }
-                                    }}
-                                    className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold border transition-all ${
-                                      matchedRecord
-                                        ? 'bg-[#121e33] hover:bg-[#1b2c4c] border-[#38517e] text-[#93c5fd] cursor-pointer'
-                                        : 'bg-[#111823] border-[#293241] text-[#94a3b8] cursor-default'
-                                    }`}
-                                    title={matchedRecord ? `Open ${entityName} profile` : undefined}
-                                  >
-                                    <Users size={9} className="text-[#5b8def]" />
-                                    <span>{entityName}</span>
-                                    {matchedRecord && <ExternalLink size={8} className="text-[#5b8def]" />}
-                                  </button>
-                                );
-                              })}
-                            </>
-                          ) : (
-                            <span className="text-[10px] text-[#657084]">Direct Entity Milestone</span>
+                          <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border ${
+                            milestone.origin === 'auto' 
+                              ? 'bg-[#0f172a] text-[#5b8def] border-[#1e293b]' 
+                              : 'bg-[#064e3b] text-[#34d399] border-[#065f46]'
+                          }`}>
+                            {milestone.origin} Node
+                          </span>
+
+                          {milestone.confidence && (
+                            <span className="px-1.5 py-0.5 rounded bg-[#111823] border border-[#293241] text-[9px] text-[#8f9bad] uppercase font-bold">
+                              Confidence: {milestone.confidence}
+                            </span>
                           )}
                         </div>
 
@@ -1039,7 +825,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
                             title={`Open database record ${recordLink}`}
                           >
                             <FileText size={10} />
-                            <span>VIEW RECORD [{recordLink}] →</span>
+                            <span>VIEW SOURCE [{recordLink}] →</span>
                           </button>
                         )}
                       </div>

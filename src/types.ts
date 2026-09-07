@@ -1,38 +1,24 @@
 export interface TimelineMilestone {
   id: string;
-  date: string; // YYYY, YYYY-MM, or YYYY-MM-DD
+  entity_id: string;
+  date: string;
   date_precision?: 'exact' | 'month' | 'year' | 'approximate';
   title: string;
-  event_type:
-    | 'Birth'
-    | 'Formation'
-    | 'Military'
-    | 'Political Decision'
-    | 'Clash / Conflict'
-    | 'Appointment'
-    | 'Ceasefire / Truce'
-    | 'Detention / Release'
-    | 'Security'
-    | 'Infrastructure'
-    | 'Mobilization'
-    | 'Death / Dissolution'
-    | 'Affiliation'
-    | 'Rivalry'
-    | string;
-  location?: string;
-  regions?: string[];
-  formatted_location?: string;
-  duration?: string;
-  coordinates?: { lat: number; lng: number };
+  event_type: string;
   description: string;
-  related_entities?: string[];
+  location?: string;
+  regions: string[];
+  coordinates?: { lat: number; lng: number };
+  source_record_id?: string;
   source?: string;
   source_date?: string;
-  confidence?: 'Verified' | 'High' | 'Medium' | 'Low' | 'Moderate' | 'Reported' | string;
-  related_record_id?: string;
-  record_id?: string;
-  is_major?: boolean;
-  stage?: 'start' | 'escalation' | 'turning_point' | 'de_escalation' | 'end' | 'development' | 'ongoing';
+  confidence?: string;
+  origin: 'auto' | 'manual';
+  is_major: boolean;
+  visible: boolean;
+  created_at: string;
+  updated_at: string;
+  stage?: 'start' | 'development' | 'escalation' | 'turning_point' | 'de_escalation' | 'end' | 'ongoing';
 }
 
 export interface RiskRecord {
@@ -55,7 +41,7 @@ export interface RiskRecord {
   coordinates?: { lat: number; lng: number };
   source?: string;
   source_date?: string;
-  confidence?: 'Verified' | 'High' | 'Medium' | 'Low';
+  confidence?: string;
   chronology?: TimelineMilestone[];
 }
 
