@@ -195,7 +195,7 @@ async function seedDatabase() {
 
   const count = await recordsCollection.countDocuments();
 
-  if (count === 0) {
+  if (count <= 2) {
     const now = new Date().toISOString();
 
     const initialRecords: RiskRecord[] = [
@@ -208,8 +208,8 @@ async function seedDatabase() {
         affiliations: ["Tajoura Battalion"],
         rivalries: ["Rada / Special Deterrence"],
         summary:
-          "Influential religious and political movement in western Libya. Exercises influence through religious institutions and affiliated armed formations.",
-        linked_events: [],
+          "Influential religious and doctrinal authority in western Libya. Exercises substantial political influence through affiliated armed formations in Tajoura and western Tripoli.",
+        linked_events: ["Tripoli Security Truce"],
         updated_at: now
       },
       {
@@ -217,19 +217,246 @@ async function seedDatabase() {
         title: "Abdul Rauf Kara",
         entity_type: "Commander",
         regions: ["West"],
-        tags: ["Rada", "Tripoli", "Security"],
+        tags: ["Rada", "Tripoli", "Security", "Mitiga"],
         affiliations: ["Special Deterrence Forces (Rada)"],
-        rivalries: ["Dar al-Ifta"],
+        rivalries: ["Dar al-Ifta", "444 Brigade"],
         summary:
-          "Commander of the Special Deterrence Forces (Rada), a powerful security apparatus based in Tripoli.",
+          "Commander of the Special Deterrence Forces (Rada), overseeing security apparatus, detention facilities, and anti-crime operations across eastern Tripoli and Mitiga.",
+        linked_events: ["Tripoli Security Truce"],
+        updated_at: now
+      },
+      {
+        id: "R2D-003",
+        title: "Mahmoud Hamza",
+        entity_type: "Commander",
+        regions: ["West"],
+        tags: ["444 Brigade", "Tripoli", "Military", "Salah al-Din"],
+        affiliations: ["444 Combat Brigade", "Ministry of Defense"],
+        rivalries: ["Special Deterrence Forces (Rada)"],
+        summary:
+          "Commander of the 444 Combat Brigade. Established one of Tripoli's most disciplined and combat-capable armed formations under the Ministry of Defense.",
+        linked_events: ["Tripoli Security Truce"],
+        updated_at: now
+      },
+      {
+        id: "R2D-004",
+        title: "444 Combat Brigade",
+        entity_type: "Armed Group",
+        regions: ["West"],
+        tags: ["Tripoli", "Infantry", "Military", "Checkpoint Security"],
+        affiliations: ["Mahmoud Hamza", "Ministry of Defense"],
+        rivalries: ["Special Deterrence Forces (Rada)", "SSA"],
+        summary:
+          "High-readiness military combat brigade headquartered in southern Tripoli. Deployed across strategic corridors connecting Tripoli, Bani Walid, and Tarhuna to deter illicit trafficking.",
+        linked_events: ["Tripoli Security Truce"],
+        updated_at: now
+      },
+      {
+        id: "R2D-005",
+        title: "Special Deterrence Forces (Rada)",
+        entity_type: "Militia",
+        regions: ["West"],
+        tags: ["Tripoli", "Salafist", "Detention", "Mitiga"],
+        affiliations: ["Abdul Rauf Kara", "Mitiga Airport Authority"],
+        rivalries: ["Dar al-Ifta", "444 Brigade", "Tajoura Lions Battalion"],
+        summary:
+          "Powerful armed militia controlling Mitiga International Airport and surrounding Souq al-Jumaa district. Operates counter-crime units and secure detention centers.",
+        linked_events: ["Tripoli Security Truce"],
+        updated_at: now
+      },
+      {
+        id: "R2D-006",
+        title: "Fathi Bashagha",
+        entity_type: "Person",
+        regions: ["West", "National"],
+        tags: ["Misrata", "Political Figure", "Ex-Interior Minister"],
+        affiliations: ["Misrata Formations", "Sirte Front"],
+        rivalries: ["Abdul Hamid Dbeibah"],
+        summary:
+          "Prominent Libyan political and security figure from Misrata. Served as Minister of Interior in the GNA, maintaining deep ties across western military councils.",
+        linked_events: [],
+        updated_at: now
+      },
+      {
+        id: "R2D-007",
+        title: "Stability Support Apparatus (SSA)",
+        entity_type: "Militia",
+        regions: ["West"],
+        tags: ["Abu Salim", "Gheniwa", "Paramilitary", "Tripoli"],
+        affiliations: ["Abdelghani al-Kikli", "Presidential Council"],
+        rivalries: ["444 Brigade", "Nawasi Brigade"],
+        summary:
+          "Well-funded paramilitary militia established by Presidential Council decree, centered in the strategic Abu Salim district of southern Tripoli.",
+        linked_events: [],
+        updated_at: now
+      },
+      {
+        id: "R2D-008",
+        title: "111 Brigade",
+        entity_type: "Armed Group",
+        regions: ["West"],
+        tags: ["Tripoli", "Misrata", "Heavy Armor", "Airport Road"],
+        affiliations: ["Abdelsalam Zoubi", "Ministry of Defense"],
+        rivalries: ["Stability Support Apparatus (SSA)"],
+        summary:
+          "Armed group with roots in Misrata Halboos brigade, securing critical infrastructure along the Tripoli Airport Road and western approaches.",
+        linked_events: [],
+        updated_at: now
+      },
+      {
+        id: "R2D-009",
+        title: "Khalifa Haftar",
+        entity_type: "Commander",
+        regions: ["East", "South"],
+        tags: ["LNA", "Benghazi", "Field Marshal", "General Command"],
+        affiliations: ["Libyan National Army (LNA)"],
+        rivalries: ["Western Armed Groups", "Tripoli Security Coalition"],
+        summary:
+          "Commander of the Libyan National Army (LNA), exercising operational control over security structures, airbases, and military divisions across eastern and southern Libya.",
+        linked_events: ["5+5 Joint Military Commission Ceasefire"],
+        updated_at: now
+      },
+      {
+        id: "R2D-010",
+        title: "Tariq Ben Ziyad Brigade",
+        entity_type: "Armed Group",
+        regions: ["East", "South"],
+        tags: ["LNA", "Ground Forces", "Specialized Units", "Benghazi"],
+        affiliations: ["Khalifa Haftar", "LNA General Command"],
+        rivalries: ["Chadian Rebel Formations"],
+        summary:
+          "Primary frontline armed brigade of the LNA, heavily equipped with armored vehicles and tasked with high-profile security operations and border patrol in the south.",
+        linked_events: [],
+        updated_at: now
+      },
+      {
+        id: "R2D-011",
+        title: "Sadiq al-Ghariani",
+        entity_type: "Person",
+        regions: ["West"],
+        tags: ["Grand Mufti", "Dar al-Ifta", "Cleric", "Religious Leadership"],
+        affiliations: ["Dar al-Ifta", "Tajoura Battalion"],
+        rivalries: ["Special Deterrence Forces (Rada)", "LNA"],
+        summary:
+          "Grand Mufti of Libya leading Dar al-Ifta, issuing binding religious fatwas and maintaining direct ideological influence over conservative revolutionary armed groups.",
+        linked_events: [],
+        updated_at: now
+      },
+      {
+        id: "R2D-012",
+        title: "Oussama al-Juweili",
+        entity_type: "Commander",
+        regions: ["West"],
+        tags: ["Zintan", "Western Military Zone", "Major General"],
+        affiliations: ["Zintan Military Council"],
+        rivalries: ["GNU Government"],
+        summary:
+          "Major General from Zintan and former commander of the Western Military Zone. Retains decisive influence among armed forces in the Nafusa Mountains and Zintan.",
+        linked_events: [],
+        updated_at: now
+      },
+      {
+        id: "R2D-013",
+        title: "Tajoura Lions Battalion",
+        entity_type: "Militia",
+        regions: ["West"],
+        tags: ["Tajoura", "Coastal Route", "Militia", "East Gate"],
+        affiliations: ["Dar al-Ifta"],
+        rivalries: ["Special Deterrence Forces (Rada)"],
+        summary:
+          "Armed militia controlling the eastern coastal gateway of Tripoli through Tajoura, maintaining ideological alignment with Dar al-Ifta.",
+        linked_events: [],
+        updated_at: now
+      },
+      {
+        id: "R2D-014",
+        title: "Petroleum Facilities Guard (PFG)",
+        entity_type: "Security Actor",
+        regions: ["East", "West", "South"],
+        tags: ["Oil Crescent", "Critical Infrastructure", "Energy Security"],
+        affiliations: ["National Oil Corporation (NOC)"],
+        rivalries: ["Local Tribal Blockaders"],
+        summary:
+          "Specialized security actor mandated with safeguarding crude export terminals, oil pipelines, and pumping stations throughout the Sirte basin and southern fields.",
+        linked_events: [],
+        updated_at: now
+      },
+      {
+        id: "R2D-015",
+        title: "Presidential Council (PC)",
+        entity_type: "Political",
+        regions: ["National", "West"],
+        tags: ["Executive", "Head of State", "Supreme Commander", "Tripoli"],
+        affiliations: ["5+5 Joint Military Commission Ceasefire"],
+        rivalries: [],
+        summary:
+          "Executive governing body established under UN-brokered political dialogue, functioning as collective head of state and nominal Supreme Commander of Libyan military forces.",
+        linked_events: ["5+5 Joint Military Commission Ceasefire"],
+        updated_at: now
+      },
+      {
+        id: "R2D-016",
+        title: "Mitiga International Airbase Complex",
+        entity_type: "Location",
+        regions: ["West"],
+        tags: ["Airfield", "Detention Center", "East Tripoli", "Strategic Site"],
+        affiliations: ["Special Deterrence Forces (Rada)"],
+        rivalries: [],
+        summary:
+          "Strategic dual-use military airbase and commercial airport on the eastern perimeter of Tripoli, serving as Rada's command center and primary detention site.",
+        linked_events: ["Tripoli Security Truce"],
+        updated_at: now
+      },
+      {
+        id: "R2D-017",
+        title: "Tripoli Security Truce",
+        entity_type: "Event",
+        regions: ["West"],
+        tags: ["Ceasefire", "De-escalation", "Urban Mediation", "Tripoli"],
+        affiliations: ["444 Combat Brigade", "Special Deterrence Forces (Rada)"],
+        rivalries: [],
+        summary:
+          "Mediated local security de-escalation in Tripoli following intense confrontations, establishing demarcation lines and joint deconfliction protocols.",
         linked_events: [],
         updated_at: now
       }
     ];
 
+    if (count > 0) {
+      // Clear old 2 records to replace with comprehensive dataset
+      for (const rec of initialRecords) {
+        await recordsCollection.replaceOne({ id: rec.id }, rec);
+      }
+    }
     await recordsCollection.insertMany(initialRecords);
 
-    console.log("Initial R2D records created.");
+    console.log("Comprehensive R2D records seeded.");
+  }
+
+  const clientsCollection = db.collection<Client>("clients");
+  const clientCount = await clientsCollection.countDocuments();
+  if (clientCount === 0) {
+    const now = new Date().toISOString();
+    const defaultClient: Client = {
+      id: "CLI-1001",
+      name: "Security Analysis & Risk Delegation",
+      access_key: "DEMO2026",
+      allowed_regions: ["West", "East", "South", "National"],
+      allowed_types: [
+        "Security Actor",
+        "Commander",
+        "Armed Group",
+        "Militia",
+        "Person",
+        "Political",
+        "Location",
+        "Event"
+      ],
+      created_at: now,
+      expires_at: new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString()
+    };
+    await clientsCollection.insertOne(defaultClient);
+    console.log("Default Demo Client (DEMO2026) seeded.");
   }
 
   await db.collection<Client>("clients").createIndex(

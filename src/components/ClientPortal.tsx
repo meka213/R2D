@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Shield,
@@ -14,7 +14,16 @@ import {
   AlertTriangle,
   CalendarDays,
   Tag,
-  Network
+  Network,
+  User,
+  ShieldAlert,
+  Award,
+  Building2,
+  ChevronDown,
+  X,
+  Layers,
+  Filter,
+  Check
 } from 'lucide-react';
 
 interface Client {
@@ -38,6 +47,207 @@ interface Record {
   linked_events: string[];
   updated_at: string;
 }
+
+export type DatabaseSection =
+  | 'all'
+  | 'person'
+  | 'armed-group'
+  | 'militia'
+  | 'commander'
+  | 'security-actor'
+  | 'political'
+  | 'location'
+  | 'event';
+
+export interface SectionConfig {
+  id: DatabaseSection;
+  label: string;
+  shortLabel: string;
+  icon: React.ComponentType<{ size?: number; className?: string }>;
+  accentColor: string;
+  badgeBg: string;
+  badgeBorder: string;
+  badgeText: string;
+  entityTypes: string[];
+  placeholder: string;
+  description: string;
+}
+
+export const SECTION_CONFIGS: SectionConfig[] = [
+  {
+    id: 'all',
+    label: 'All Sections',
+    shortLabel: 'All',
+    icon: Layers,
+    accentColor: 'text-[#5b8def]',
+    badgeBg: 'bg-[#1b2537]',
+    badgeBorder: 'border-[#334668]',
+    badgeText: 'text-[#9dbaff]',
+    entityTypes: [],
+    placeholder: 'Search all intelligence records, actors, locations, events...',
+    description: 'Complete cross-database intelligence catalog'
+  },
+  {
+    id: 'person',
+    label: 'Person',
+    shortLabel: 'Person',
+    icon: User,
+    accentColor: 'text-[#38bdf8]',
+    badgeBg: 'bg-[#0f283d]',
+    badgeBorder: 'border-[#1b4b72]',
+    badgeText: 'text-[#7dd3fc]',
+    entityTypes: ['Person', 'Individual', 'Key Individual', 'Political Figure', 'Cleric'],
+    placeholder: 'Search persons, key figures, ministers, scholars...',
+    description: 'Influential individuals, political figures, and scholars'
+  },
+  {
+    id: 'armed-group',
+    label: 'Armed Group',
+    shortLabel: 'Armed Group',
+    icon: Users,
+    accentColor: 'text-[#fbbf24]',
+    badgeBg: 'bg-[#31250d]',
+    badgeBorder: 'border-[#614a1a]',
+    badgeText: 'text-[#fde68a]',
+    entityTypes: ['Armed Group', 'Brigade', 'Combat Brigade', 'Armed Formation', 'Armed Movement'],
+    placeholder: 'Search armed groups, brigades, battalions, forces...',
+    description: 'Organized military brigades and armed formations'
+  },
+  {
+    id: 'militia',
+    label: 'Militia',
+    shortLabel: 'Militia',
+    icon: ShieldAlert,
+    accentColor: 'text-[#f87171]',
+    badgeBg: 'bg-[#371619]',
+    badgeBorder: 'border-[#6e2930]',
+    badgeText: 'text-[#fca5a5]',
+    entityTypes: ['Militia', 'Local Formation', 'Paramilitary', 'Apparatus'],
+    placeholder: 'Search militias, armed factions, security units...',
+    description: 'Paramilitary militias and local territorial factions'
+  },
+  {
+    id: 'commander',
+    label: 'Commander',
+    shortLabel: 'Commander',
+    icon: Award,
+    accentColor: 'text-[#a78bfa]',
+    badgeBg: 'bg-[#291e3e]',
+    badgeBorder: 'border-[#533c7d]',
+    badgeText: 'text-[#c4b5fd]',
+    entityTypes: ['Commander', 'Military Commander', 'General', 'Officer', 'Field Marshal'],
+    placeholder: 'Search commanders, military leadership, generals...',
+    description: 'Unit commanders and senior security decision-makers'
+  },
+  {
+    id: 'security-actor',
+    label: 'Security Actor',
+    shortLabel: 'Security',
+    icon: Shield,
+    accentColor: 'text-[#34d399]',
+    badgeBg: 'bg-[#102e22]',
+    badgeBorder: 'border-[#1d5c43]',
+    badgeText: 'text-[#6ee7b7]',
+    entityTypes: ['Security Actor', 'Security Apparatus', 'Agency', 'Guard', 'Doctrinal Authority'],
+    placeholder: 'Search security apparatuses, institutional actors...',
+    description: 'Official security apparatuses, guards, and institutional actors'
+  },
+  {
+    id: 'political',
+    label: 'Political',
+    shortLabel: 'Political',
+    icon: Building2,
+    accentColor: 'text-[#e879f9]',
+    badgeBg: 'bg-[#33183b]',
+    badgeBorder: 'border-[#662e76]',
+    badgeText: 'text-[#f0abfc]',
+    entityTypes: ['Political', 'Institution', 'Government', 'Council', 'Executive'],
+    placeholder: 'Search political bodies, executive councils, ministries...',
+    description: 'Sovereign political bodies and governance councils'
+  },
+  {
+    id: 'location',
+    label: 'Location',
+    shortLabel: 'Location',
+    icon: MapPin,
+    accentColor: 'text-[#f97316]',
+    badgeBg: 'bg-[#341d10]',
+    badgeBorder: 'border-[#68371d]',
+    badgeText: 'text-[#fdba74]',
+    entityTypes: ['Location', 'Facility', 'Strategic Site', 'Airbase', 'Terminal', 'Port'],
+    placeholder: 'Search strategic facilities, airbases, ports, terminals...',
+    description: 'Strategic facilities, dual-use bases, and critical infrastructure'
+  },
+  {
+    id: 'event',
+    label: 'Event',
+    shortLabel: 'Event',
+    icon: CalendarDays,
+    accentColor: 'text-[#22d3ee]',
+    badgeBg: 'bg-[#0f2d34]',
+    badgeBorder: 'border-[#1b5563]',
+    badgeText: 'text-[#67e8f9]',
+    entityTypes: ['Event', 'Operation', 'Incident', 'Clash', 'Ceasefire', 'Truce', 'Talks'],
+    placeholder: 'Search security events, operations, ceasefires, talks...',
+    description: 'Operational incidents, ceasefires, and security summits'
+  }
+];
+
+export const getSectionForEntityType = (entityType: string = ''): SectionConfig => {
+  const norm = entityType.toLowerCase();
+  for (const config of SECTION_CONFIGS) {
+    if (config.id === 'all') continue;
+    if (config.entityTypes.some(t => norm.includes(t.toLowerCase()))) {
+      return config;
+    }
+  }
+  return SECTION_CONFIGS[0];
+};
+
+export const recordMatchesSection = (record: Record, section: DatabaseSection): boolean => {
+  if (section === 'all') return true;
+  const config = SECTION_CONFIGS.find(s => s.id === section);
+  if (!config) return true;
+
+  const type = (record.entity_type || '').toLowerCase();
+  const title = (record.title || '').toLowerCase();
+  const tags = (record.tags || []).map(t => t.toLowerCase());
+
+  // 1. Check entity_type
+  if (config.entityTypes.some(t => type.includes(t.toLowerCase()))) {
+    return true;
+  }
+
+  // 2. Check tags
+  if (tags.some(tag => config.entityTypes.some(t => tag.includes(t.toLowerCase())))) {
+    return true;
+  }
+
+  // 3. Fallback keywords
+  if (section === 'commander' && (tags.includes('commander') || title.includes('commander') || type.includes('commander'))) {
+    return true;
+  }
+  if (section === 'armed-group' && (tags.includes('armed group') || type.includes('group') || type.includes('brigade') || title.includes('brigade'))) {
+    return true;
+  }
+  if (section === 'militia' && (tags.includes('militia') || type.includes('militia'))) {
+    return true;
+  }
+  if (section === 'person' && (tags.includes('person') || type.includes('person') || tags.includes('individual'))) {
+    return true;
+  }
+  if (section === 'political' && (tags.includes('political') || type.includes('political'))) {
+    return true;
+  }
+  if (section === 'location' && (type.includes('location') || type.includes('site') || type.includes('facility') || type.includes('airbase'))) {
+    return true;
+  }
+  if (section === 'event' && (type.includes('event') || type.includes('truce') || type.includes('ceasefire'))) {
+    return true;
+  }
+
+  return false;
+};
 
 interface ClientPortalProps {
   onLogout: () => void;
@@ -154,6 +364,10 @@ export default function ClientPortal({
   const [client, setClient] = useState<Client | null>(null);
   const [records, setRecords] = useState<Record[]>([]);
   const [search, setSearch] = useState('');
+  const [selectedSection, setSelectedSection] =
+    useState<DatabaseSection>('all');
+  const [showSectionDropdown, setShowSectionDropdown] =
+    useState(false);
   const [selectedId, setSelectedId] =
     useState<string | null>(null);
   const [activeTab, setActiveTab] =
@@ -174,10 +388,12 @@ export default function ClientPortal({
   // Used to detect clicks outside the search area.
   const searchContainerRef =
     useRef<HTMLDivElement | null>(null);
+  const sectionDropdownRef =
+    useRef<HTMLDivElement | null>(null);
 
   /*
    * Close search suggestions when clicking anywhere outside
-   * the search container.
+   * the search container or dropdown.
    */
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -188,6 +404,14 @@ export default function ClientPortal({
         )
       ) {
         setShowSearchResults(false);
+      }
+      if (
+        sectionDropdownRef.current &&
+        !sectionDropdownRef.current.contains(
+          event.target as Node
+        )
+      ) {
+        setShowSectionDropdown(false);
       }
     };
 
@@ -205,10 +429,68 @@ export default function ClientPortal({
   }, []);
 
   /*
+   * Count available records per database section.
+   */
+  const sectionCounts = useMemo(() => {
+    const counts: { [key in DatabaseSection]: number } = {
+      all: records.length,
+      person: 0,
+      'armed-group': 0,
+      militia: 0,
+      commander: 0,
+      'security-actor': 0,
+      political: 0,
+      location: 0,
+      event: 0
+    };
+
+    records.forEach(rec => {
+      SECTION_CONFIGS.forEach(sec => {
+        if (sec.id !== 'all' && recordMatchesSection(rec, sec.id)) {
+          counts[sec.id] = (counts[sec.id] || 0) + 1;
+        }
+      });
+    });
+
+    return counts;
+  }, [records]);
+
+  const activeSectionConfig = useMemo(() => {
+    return (
+      SECTION_CONFIGS.find(s => s.id === selectedSection) ||
+      SECTION_CONFIGS[0]
+    );
+  }, [selectedSection]);
+
+  const ActiveSectionIcon = activeSectionConfig.icon;
+
+  const selectSection = (sec: DatabaseSection) => {
+    setSelectedSection(sec);
+    setShowSectionDropdown(false);
+    setShowSearchResults(true);
+
+    // If an open record does not match the chosen section, reset it
+    if (selectedId && sec !== 'all') {
+      const rec = records.find(r => r.id === selectedId);
+      if (rec && !recordMatchesSection(rec, sec)) {
+        setSelectedId(null);
+      }
+    }
+  };
+
+  /*
+   * Check for saved session access key on mount.
+   */
+  useEffect(() => {
+    const savedKey = sessionStorage.getItem('r2d_client_key');
+    if (savedKey) {
+      setAccessKeyInput(savedKey);
+      performLogin(savedKey);
+    }
+  }, []);
+
+  /*
    * Fetch the real database last-updated timestamp.
-   *
-   * The server endpoint returns the timestamp of the
-   * newest record in the database.
    */
   useEffect(() => {
     const fetchDatabaseStatus = async () => {
@@ -231,9 +513,6 @@ export default function ClientPortal({
 
     fetchDatabaseStatus();
 
-    /*
-     * Refresh database status every 30 seconds.
-     */
     const interval = setInterval(
       fetchDatabaseStatus,
       30000
@@ -242,9 +521,7 @@ export default function ClientPortal({
     return () => clearInterval(interval);
   }, []);
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-
+  const performLogin = async (key: string) => {
     setLoading(true);
     setError('');
 
@@ -255,8 +532,7 @@ export default function ClientPortal({
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          access_key:
-            accessKeyInput.toUpperCase()
+          access_key: key.toUpperCase().trim()
         })
       });
 
@@ -264,14 +540,13 @@ export default function ClientPortal({
         const clientData = await res.json();
 
         setClient(clientData);
+        sessionStorage.setItem('r2d_client_key', clientData.access_key);
         setSelectedId(null);
         setSearch('');
         setShowSearchResults(false);
         setActiveTab('overview');
 
-        await fetchRecords(
-          clientData.access_key
-        );
+        await fetchRecords(clientData.access_key);
       } else {
         const errData = await res.json();
 
@@ -285,6 +560,17 @@ export default function ClientPortal({
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    performLogin(accessKeyInput);
+  };
+
+  const handleClientLogout = () => {
+    sessionStorage.removeItem('r2d_client_key');
+    setClient(null);
+    onLogout();
   };
 
   const fetchRecords = async (key: string) => {
@@ -434,6 +720,20 @@ export default function ClientPortal({
             </button>
           </form>
 
+          <div className="mt-4 pt-4 border-t border-[#202733] text-center">
+            <button
+              type="button"
+              onClick={() => {
+                setAccessKeyInput('DEMO2026');
+                performLogin('DEMO2026');
+              }}
+              className="text-[11px] text-[#5b8def] hover:text-[#8cb3ff] transition-colors font-semibold inline-flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg bg-[#162133] border border-[#2b3c5c]"
+            >
+              <Shield size={12} />
+              Fill Demo Agency Access (DEMO2026)
+            </button>
+          </div>
+
           <button
             onClick={onLogout}
             className="w-full mt-6 flex items-center justify-center gap-2 text-[#8f9bad] hover:text-[#e7ebf2] transition-colors text-xs font-bold"
@@ -446,13 +746,29 @@ export default function ClientPortal({
     );
   }
 
-  const normalizedSearch =
-    search.trim().toLowerCase();
+  const normalizedSearch = search.trim().toLowerCase();
 
-  const filteredRecords = records.filter(
-    record => {
-      if (!normalizedSearch) return false;
+  const filteredRecords = useMemo(() => {
+    // If neither search nor section filter is active, return empty for default view
+    if (!normalizedSearch && selectedSection === 'all') {
+      return [];
+    }
 
+    return records.filter(record => {
+      // 1. Filter by section if not 'all'
+      if (
+        selectedSection !== 'all' &&
+        !recordMatchesSection(record, selectedSection)
+      ) {
+        return false;
+      }
+
+      // 2. If no text query, all records matching the section qualify
+      if (!normalizedSearch) {
+        return true;
+      }
+
+      // 3. Search text query match across all relevant fields
       const searchableFields = [
         record.title,
         record.entity_type,
@@ -469,8 +785,8 @@ export default function ClientPortal({
           .toLowerCase()
           .includes(normalizedSearch)
       );
-    }
-  );
+    });
+  }, [records, normalizedSearch, selectedSection]);
 
   const selectedRecord = records.find(
     r => r.id === selectedId
@@ -492,23 +808,19 @@ export default function ClientPortal({
   const handleSearch = (value: string) => {
     setSearch(value);
 
-    /*
-     * When the user types, show the live search results.
-     */
     if (value.trim()) {
       setShowSearchResults(true);
-
-      // Close any previously opened profile when
-      // starting a new search.
       setSelectedId(null);
       setActiveTab('overview');
+    } else if (selectedSection !== 'all') {
+      setShowSearchResults(true);
     } else {
       setShowSearchResults(false);
     }
   };
 
   const handleSearchFocus = () => {
-    if (search.trim()) {
+    if (search.trim() || selectedSection !== 'all') {
       setShowSearchResults(true);
     }
   };
@@ -516,13 +828,6 @@ export default function ClientPortal({
   const handleSearchKeyDown = (
     e: React.KeyboardEvent<HTMLInputElement>
   ) => {
-    /*
-     * Pressing Enter closes the suggestions.
-     *
-     * If there is exactly one match, open it automatically.
-     * If there are multiple matches, keep the search active
-     * but simply close the dropdown.
-     */
     if (e.key === 'Enter') {
       e.preventDefault();
 
@@ -535,9 +840,6 @@ export default function ClientPortal({
       }
     }
 
-    /*
-     * Escape immediately closes the suggestions.
-     */
     if (e.key === 'Escape') {
       setShowSearchResults(false);
     }
@@ -611,7 +913,7 @@ export default function ClientPortal({
             </div>
 
             <button
-              onClick={onLogout}
+              onClick={handleClientLogout}
               className="bg-transparent text-[#8f9bad] hover:text-[#d96a73] transition-colors p-0 font-bold text-xs flex items-center gap-2"
             >
               <LogOut size={16} />
@@ -620,159 +922,339 @@ export default function ClientPortal({
           </div>
         </div>
 
-        {/* Search */}
+        {/* Search & Database Section Filter Area */}
         <div
           ref={searchContainerRef}
           className="relative mb-[18px]"
         >
-          <div className="flex gap-[10px]">
-            <div className="flex-1 relative">
+          {/* Quick Filter Section Pills Bar */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-2.5 mb-1.5 scrollbar-none">
+            <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-bold text-[#657084] mr-1 shrink-0 select-none">
+              <Filter size={12} className="text-[#5b8def]" />
+              <span>Section:</span>
+            </div>
+
+            {SECTION_CONFIGS.map(sec => {
+              const Icon = sec.icon;
+              const isSelected = selectedSection === sec.id;
+              const count = sectionCounts[sec.id] || 0;
+
+              return (
+                <button
+                  key={sec.id}
+                  type="button"
+                  onClick={() => selectSection(sec.id)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-[6px] text-[11px] font-semibold transition-all whitespace-nowrap border shrink-0 ${
+                    isSelected
+                      ? 'bg-[#1b2b4a] text-[#b5cbff] border-[#5b8def] shadow-sm'
+                      : 'bg-[#141922] text-[#8f9bad] hover:text-[#e7ebf2] hover:bg-[#18202d] border-[#293241]'
+                  }`}
+                  title={`${sec.label}: ${sec.description}`}
+                >
+                  <Icon
+                    size={12}
+                    className={isSelected ? 'text-[#5b8def]' : sec.accentColor}
+                  />
+                  <span>{sec.label}</span>
+                  <span
+                    className={`text-[9px] font-mono px-1.5 py-0.5 rounded ${
+                      isSelected
+                        ? 'bg-[#253966] text-[#c7dbff]'
+                        : 'bg-[#1a222f] text-[#6f7e94]'
+                    }`}
+                  >
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+
+            {selectedSection !== 'all' && (
+              <button
+                type="button"
+                onClick={() => selectSection('all')}
+                className="flex items-center gap-1 px-2 py-1 text-[10px] text-[#8f9bad] hover:text-[#d96a73] transition-colors ml-1 shrink-0 font-medium"
+                title="Reset to all sections"
+              >
+                <X size={12} />
+                <span>Reset</span>
+              </button>
+            )}
+          </div>
+
+          {/* Main Search Input with Integrated Section Selector */}
+          <div className="flex items-stretch bg-[#151a22] border border-[#293241] rounded-[8px] focus-within:border-[#456bb8] transition-all shadow-md overflow-hidden">
+            {/* Integrated Section Dropdown */}
+            <div className="relative" ref={sectionDropdownRef}>
+              <button
+                type="button"
+                onClick={() => setShowSectionDropdown(!showSectionDropdown)}
+                className="h-full px-3.5 py-3 flex items-center gap-2 bg-[#18202c] hover:bg-[#1f2837] text-[#dfe6f1] border-r border-[#293241] transition-colors text-[12px] font-bold tracking-wide whitespace-nowrap select-none"
+                title="Select database section to filter"
+              >
+                <ActiveSectionIcon
+                  size={15}
+                  className={activeSectionConfig.accentColor}
+                />
+                <span className="hidden sm:inline">
+                  {activeSectionConfig.label}
+                </span>
+                <span className="sm:hidden">
+                  {activeSectionConfig.shortLabel}
+                </span>
+                <ChevronDown
+                  size={13}
+                  className={`text-[#718096] transition-transform ${
+                    showSectionDropdown ? 'rotate-180' : ''
+                  }`}
+                />
+              </button>
+
+              {showSectionDropdown && (
+                <div className="absolute top-full left-0 mt-1.5 w-72 bg-[#121720] border border-[#293241] rounded-[8px] shadow-2xl z-50 py-1.5 overflow-hidden backdrop-blur-md">
+                  <div className="px-3.5 py-1.5 text-[9px] uppercase tracking-wider font-bold text-[#657084] border-b border-[#202733] flex justify-between items-center">
+                    <span>Database Sections</span>
+                    <span className="text-[#5b8def] font-mono">
+                      {records.length} Total
+                    </span>
+                  </div>
+
+                  <div className="max-h-72 overflow-y-auto custom-scrollbar">
+                    {SECTION_CONFIGS.map(sec => {
+                      const Icon = sec.icon;
+                      const isSel = selectedSection === sec.id;
+                      const count = sectionCounts[sec.id] || 0;
+
+                      return (
+                        <button
+                          key={sec.id}
+                          type="button"
+                          onClick={() => selectSection(sec.id)}
+                          className={`w-full text-left px-3.5 py-2.5 flex items-center justify-between hover:bg-[#182130] transition-colors text-[12px] border-b border-[#1b2330] last:border-b-0 ${
+                            isSel
+                              ? 'bg-[#1a2a49] text-[#9dbaff] font-bold'
+                              : 'text-[#cbd4e2]'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <Icon
+                              size={15}
+                              className={
+                                isSel ? 'text-[#5b8def]' : sec.accentColor
+                              }
+                            />
+                            <div>
+                              <div className="leading-tight">{sec.label}</div>
+                              <div className="text-[9px] text-[#657084] font-normal leading-tight mt-0.5">
+                                {sec.description}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 ml-2 shrink-0">
+                            <span
+                              className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${
+                                isSel
+                                  ? 'bg-[#253966] text-[#c3d7ff]'
+                                  : 'bg-[#171f2c] text-[#8f9bad]'
+                              }`}
+                            >
+                              {count}
+                            </span>
+                            {isSel && (
+                              <Check size={12} className="text-[#5b8def]" />
+                            )}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Input with Search Icon & Quick Status */}
+            <div className="flex-1 relative flex items-center">
               <Search
-                size={18}
-                className="absolute left-4 top-1/2 -translate-y-1/2 text-[#8f9bad]"
+                size={16}
+                className="absolute left-3.5 text-[#718096] pointer-events-none"
               />
 
               <input
                 value={search}
-                onChange={e =>
-                  handleSearch(
-                    e.target.value
-                  )
-                }
-                onFocus={
-                  handleSearchFocus
-                }
-                onKeyDown={
-                  handleSearchKeyDown
-                }
-                placeholder="Search names, entities, locations, affiliations, rivalries, tags or events..."
-                className="w-full bg-[#151a22] border border-[#293241] rounded-[7px] text-[#e7ebf2] p-[13px_15px_13px_45px] text-[14px] outline-none focus:border-[#456bb8] transition-colors"
+                onChange={e => handleSearch(e.target.value)}
+                onFocus={handleSearchFocus}
+                onKeyDown={handleSearchKeyDown}
+                placeholder={activeSectionConfig.placeholder}
+                className="w-full bg-transparent text-[#e7ebf2] py-3.5 pl-10 pr-28 text-[13px] outline-none placeholder:text-[#525f77]"
               />
+
+              {/* Status and Clear Controls */}
+              <div className="absolute right-3 flex items-center gap-2">
+                {selectedSection !== 'all' && (
+                  <span className="hidden md:flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-[#1c283f] text-[#86abf9] border border-[#2e4777] font-semibold">
+                    <ActiveSectionIcon size={10} />
+                    <span>{activeSectionConfig.shortLabel}</span>
+                    <button
+                      type="button"
+                      onClick={() => selectSection('all')}
+                      className="hover:text-white ml-0.5"
+                      title="Clear section filter"
+                    >
+                      <X size={10} />
+                    </button>
+                  </span>
+                )}
+
+                {search && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearch('');
+                      if (selectedSection === 'all') {
+                        setShowSearchResults(false);
+                      }
+                    }}
+                    className="text-[#718096] hover:text-[#e7ebf2] p-1 rounded hover:bg-[#1f2837] transition-colors"
+                    title="Clear search query"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+
+                {(search || selectedSection !== 'all') && (
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#1b2330] border border-[#2a374a] text-[#8fa3c7]">
+                    {filteredRecords.length}{' '}
+                    {filteredRecords.length === 1 ? 'match' : 'matches'}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 
-          {/* Live search results */}
-          {normalizedSearch &&
+          {/* Live search results dropdown */}
+          {(normalizedSearch || (selectedSection !== 'all' && showSearchResults)) &&
             showSearchResults && (
-              <div className="absolute z-50 left-0 right-0 mt-2 bg-[#121720] border border-[#293241] rounded-[8px] shadow-2xl overflow-hidden">
+              <div className="absolute z-50 left-0 right-0 mt-2 bg-[#121720] border border-[#293241] rounded-[8px] shadow-2xl overflow-hidden backdrop-blur-md">
+                <div className="px-4 py-3 border-b border-[#293241] flex justify-between items-center bg-[#151c27]">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] uppercase tracking-widest font-bold text-[#8f9bad]">
+                      Intelligence Search
+                    </span>
+                    {selectedSection !== 'all' && (
+                      <span className="text-[9px] uppercase tracking-wider px-2 py-0.5 rounded bg-[#1e2c45] text-[#9dbaff] border border-[#374f7c] font-bold flex items-center gap-1">
+                        <ActiveSectionIcon size={10} />
+                        {activeSectionConfig.label}
+                      </span>
+                    )}
+                  </div>
 
-                <div className="px-4 py-3 border-b border-[#293241] flex justify-between items-center">
-                  <span className="text-[10px] uppercase tracking-widest font-bold text-[#8f9bad]">
-                    Intelligence Search
-                  </span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-[10px] text-[#5b8def] font-bold font-mono">
+                      {filteredRecords.length}{' '}
+                      {filteredRecords.length === 1 ? 'MATCH' : 'MATCHES'}
+                    </span>
 
-                  <span className="text-[10px] text-[#5b8def] font-bold">
-                    {filteredRecords.length}{' '}
-                    MATCH
-                    {filteredRecords.length ===
-                    1
-                      ? ''
-                      : 'ES'}
-                  </span>
+                    {(normalizedSearch || selectedSection !== 'all') && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSearch('');
+                          setSelectedSection('all');
+                          setShowSearchResults(false);
+                        }}
+                        className="text-[10px] text-[#718096] hover:text-[#d96a73] font-semibold transition-colors"
+                      >
+                        Clear filters
+                      </button>
+                    )}
+                  </div>
                 </div>
 
-                {filteredRecords.length >
-                0 ? (
-                  <div className="max-h-[360px] overflow-y-auto custom-scrollbar">
+                {filteredRecords.length > 0 ? (
+                  <div className="max-h-[380px] overflow-y-auto custom-scrollbar">
+                    {filteredRecords.slice(0, 15).map(record => {
+                      const secConfig = getSectionForEntityType(
+                        record.entity_type
+                      );
+                      const SecIcon = secConfig.icon;
 
-                    {filteredRecords
-                      .slice(0, 12)
-                      .map(record => (
+                      return (
                         <button
                           key={record.id}
-                          onClick={() =>
-                            openRecord(
-                              record.id
-                            )
-                          }
-                          className="w-full text-left px-4 py-3 border-b border-[#202733] hover:bg-[#171d27] transition-colors"
+                          onClick={() => openRecord(record.id)}
+                          className="w-full text-left px-4 py-3 border-b border-[#202733] hover:bg-[#171d27] transition-colors group"
                         >
                           <div className="flex items-start justify-between gap-4">
-
                             <div className="min-w-0">
-
-                              <div className="font-bold text-[13px] text-[#e7ebf2] truncate">
+                              <div className="font-bold text-[13px] text-[#e7ebf2] group-hover:text-[#5b8def] transition-colors truncate">
                                 {record.title}
                               </div>
 
                               <div className="flex items-center gap-2 mt-1">
-                                <span className="text-[9px] uppercase tracking-wider font-bold text-[#9db5e9]">
+                                <span
+                                  className={`text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded border flex items-center gap-1 ${secConfig.badgeBg} ${secConfig.badgeBorder} ${secConfig.badgeText}`}
+                                >
+                                  <SecIcon size={10} />
                                   {record.entity_type}
                                 </span>
 
-                                {record.regions
-                                  .slice(0, 2)
-                                  .map(
-                                    region => (
-                                      <span
-                                        key={
-                                          region
-                                        }
-                                        className="text-[9px] text-[#8f9bad]"
-                                      >
-                                        •{' '}
-                                        {
-                                          region
-                                        }
-                                      </span>
-                                    )
-                                  )}
+                                {record.regions.slice(0, 2).map(region => (
+                                  <span
+                                    key={region}
+                                    className="text-[9px] text-[#8f9bad]"
+                                  >
+                                    • {region}
+                                  </span>
+                                ))}
                               </div>
 
                               <div className="flex flex-wrap gap-1 mt-2">
-                                {record.tags
-                                  .slice(0, 4)
-                                  .map(
-                                    tag => (
-                                      <span
-                                        key={
-                                          tag
-                                        }
-                                        className="text-[9px] px-1.5 py-0.5 rounded bg-[#111823] border border-[#293241] text-[#8f9bad]"
-                                      >
-                                        {
-                                          tag
-                                        }
-                                      </span>
-                                    )
-                                  )}
+                                {record.tags.slice(0, 4).map(tag => (
+                                  <span
+                                    key={tag}
+                                    className="text-[9px] px-1.5 py-0.5 rounded bg-[#111823] border border-[#293241] text-[#8f9bad]"
+                                  >
+                                    {tag}
+                                  </span>
+                                ))}
                               </div>
-
                             </div>
 
                             <ChevronRight
                               size={16}
-                              className="text-[#5b8def] shrink-0 mt-1"
+                              className="text-[#5b8def] shrink-0 mt-1 opacity-60 group-hover:opacity-100 transition-opacity"
                             />
-
                           </div>
                         </button>
-                      ))}
-
+                      );
+                    })}
                   </div>
                 ) : (
                   <div className="p-8 text-center">
-
                     <Search
                       size={28}
                       className="mx-auto mb-3 text-[#465267]"
                     />
-
                     <p className="text-[12px] font-bold text-[#b8c2d2]">
-                      No matching intelligence
-                      records
+                      No matching intelligence records
                     </p>
-
                     <p className="text-[10px] text-[#657084] mt-1">
-                      Try a name,
-                      organization,
-                      location, tag or
-                      event.
+                      {selectedSection !== 'all'
+                        ? `No records found in section "${activeSectionConfig.label}" matching "${search}".`
+                        : 'Try searching by name, organization, commander, location, tag or event.'}
                     </p>
-
+                    {selectedSection !== 'all' && (
+                      <button
+                        type="button"
+                        onClick={() => selectSection('all')}
+                        className="mt-3 text-[11px] text-[#5b8def] hover:underline font-semibold"
+                      >
+                        Search all database sections instead
+                      </button>
+                    )}
                   </div>
                 )}
-
               </div>
             )}
         </div>
@@ -1740,138 +2222,154 @@ export default function ClientPortal({
             </div>
 
             <div className="flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <h3 className="m-0 text-[13px] font-bold uppercase tracking-wider text-[#b8c2d2]">
+                  Search results
+                </h3>
+                {selectedSection !== 'all' && (
+                  <span className="text-[9px] uppercase tracking-wider px-2 py-0.5 rounded bg-[#1e2c45] text-[#9dbaff] border border-[#374f7c] font-bold flex items-center gap-1">
+                    <ActiveSectionIcon size={10} />
+                    {activeSectionConfig.shortLabel}
+                  </span>
+                )}
+              </div>
 
-              <h3 className="m-0 text-[13px] font-bold uppercase tracking-wider text-[#b8c2d2]">
-                Search results
-              </h3>
-
-              <span className="text-[10px] bg-[#24334d] text-[#a9c2ff] p-[4px_7px] rounded-[10px] font-bold">
-                {normalizedSearch
-                  ? filteredRecords.length
-                  : 0}
-              </span>
-
+              <div className="flex items-center gap-2">
+                {(normalizedSearch || selectedSection !== 'all') && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearch('');
+                      setSelectedSection('all');
+                    }}
+                    className="text-[9px] text-[#718096] hover:text-[#d96a73] font-semibold transition-colors"
+                  >
+                    Reset
+                  </button>
+                )}
+                <span className="text-[10px] bg-[#24334d] text-[#a9c2ff] p-[4px_7px] rounded-[10px] font-bold font-mono">
+                  {normalizedSearch || selectedSection !== 'all'
+                    ? filteredRecords.length
+                    : 0}
+                </span>
+              </div>
             </div>
 
-            {!normalizedSearch ? (
+            {!normalizedSearch && selectedSection === 'all' ? (
+              <div className="flex-1 min-h-[250px] flex flex-col items-center justify-center text-center p-3">
+                <Layers size={28} className="text-[#3c4657] mb-2" />
+                <p className="text-[12px] font-bold text-[#b8c2d2] mb-1">
+                  Browse by Section
+                </p>
+                <p className="text-[11px] text-[#657084] leading-relaxed mb-4">
+                  Select an intelligence section to inspect matching entities:
+                </p>
 
-              <div className="flex-1 min-h-[250px] flex items-center justify-center text-center">
+                <div className="grid grid-cols-2 gap-1.5 w-full">
+                  {SECTION_CONFIGS.filter(s => s.id !== 'all').map(sec => {
+                    const SecIcon = sec.icon;
+                    const count = sectionCounts[sec.id] || 0;
 
-                <div>
-
-                  <Search
-                    size={30}
-                    className="mx-auto mb-3 text-[#3c4657]"
-                  />
-
-                  <p className="text-[11px] text-[#657084] leading-[1.5]">
-                    Search the database
-                    <br />
-                    to view matching
-                    entities.
-                  </p>
-
+                    return (
+                      <button
+                        key={sec.id}
+                        type="button"
+                        onClick={() => selectSection(sec.id)}
+                        className="flex items-center justify-between p-2 rounded bg-[#171d27] border border-[#242c3b] hover:border-[#456bb8] text-left transition-colors group"
+                      >
+                        <div className="flex items-center gap-1.5 truncate">
+                          <SecIcon size={12} className={sec.accentColor} />
+                          <span className="text-[10px] font-bold text-[#cbd4e2] group-hover:text-white truncate">
+                            {sec.shortLabel}
+                          </span>
+                        </div>
+                        <span className="text-[9px] font-mono text-[#718096] px-1 py-0.2 rounded bg-[#111722] shrink-0">
+                          {count}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
-
               </div>
-
-            ) : filteredRecords.length ===
-              0 ? (
-
-              <div className="flex-1 min-h-[250px] flex items-center justify-center text-center">
-
-                <div>
-
-                  <Search
-                    size={28}
-                    className="mx-auto mb-3 text-[#3c4657]"
-                  />
-
-                  <p className="text-[11px] text-[#657084]">
-                    No matching records.
-                  </p>
-
-                </div>
-
+            ) : filteredRecords.length === 0 ? (
+              <div className="flex-1 min-h-[250px] flex flex-col items-center justify-center text-center p-4">
+                <Search
+                  size={28}
+                  className="mx-auto mb-3 text-[#3c4657]"
+                />
+                <p className="text-[11px] font-bold text-[#8f9bad]">
+                  No matching records.
+                </p>
+                <p className="text-[10px] text-[#657084] mt-1">
+                  {selectedSection !== 'all'
+                    ? `No records found in "${activeSectionConfig.label}".`
+                    : 'Try another keyword or filter.'}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearch('');
+                    setSelectedSection('all');
+                  }}
+                  className="mt-3 text-[10px] px-2.5 py-1 rounded bg-[#1c283f] text-[#86abf9] border border-[#2e4777] font-semibold"
+                >
+                  Reset all filters
+                </button>
               </div>
-
             ) : (
-
               <div className="overflow-y-auto pr-1 space-y-[9px] custom-scrollbar max-h-[650px]">
+                {filteredRecords.map(record => {
+                  const secConfig = getSectionForEntityType(
+                    record.entity_type
+                  );
+                  const SecIcon = secConfig.icon;
 
-                {filteredRecords.map(
-                  record => (
-
+                  return (
                     <button
                       key={record.id}
-                      onClick={() =>
-                        openRecord(
-                          record.id
-                        )
-                      }
+                      onClick={() => openRecord(record.id)}
                       className={`w-full text-left p-[12px] bg-[#171d27] border rounded-[7px] transition-all group ${
-                        selectedId ===
-                        record.id
+                        selectedId === record.id
                           ? 'border-[#5b8def]'
                           : 'border-[#293241] hover:border-[#456bb8]'
                       }`}
                     >
-
                       <div className="flex justify-between gap-2">
-
                         <div className="font-bold text-[#dfe6f1] group-hover:text-[#5b8def] transition-colors text-[12px]">
-                          {
-                            record.title
-                          }
+                          {record.title}
                         </div>
 
                         <ChevronRight
                           size={14}
                           className="text-[#465267] group-hover:text-[#5b8def] shrink-0"
                         />
-
                       </div>
 
-                      <div className="text-[9px] text-[#9db5e9] mt-[5px] uppercase tracking-[0.7px] font-bold">
-                        {
-                          record.entity_type
-                        }
-                      </div>
+                      <div className="flex items-center gap-1.5 mt-[6px]">
+                        <span
+                          className={`text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded border flex items-center gap-1 ${secConfig.badgeBg} ${secConfig.badgeBorder} ${secConfig.badgeText}`}
+                        >
+                          <SecIcon size={9} />
+                          {record.entity_type}
+                        </span>
 
-                      <div className="flex flex-wrap gap-1 mt-2">
-
-                        {record.regions
-                          .slice(0, 2)
-                          .map(
-                            region => (
-                              <span
-                                key={
-                                  region
-                                }
-                                className="text-[9px] text-[#8f9bad]"
-                              >
-                                {
-                                  region
-                                }
-                              </span>
-                            )
-                          )}
-
+                        {record.regions.slice(0, 2).map(region => (
+                          <span
+                            key={region}
+                            className="text-[9px] text-[#8f9bad]"
+                          >
+                            • {region}
+                          </span>
+                        ))}
                       </div>
 
                       <p className="text-[10px] text-[#8f9bad] leading-[1.45] m-[7px_0_0] line-clamp-2">
-                        {
-                          record.summary
-                        }
+                        {record.summary}
                       </p>
-
                     </button>
-
-                  )
-                )}
-
+                  );
+                })}
               </div>
-
             )}
 
           </aside>
