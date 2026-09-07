@@ -1,9 +1,9 @@
 import express from "express";
 import path from "path";
-import { createViteServer } from "vite";
+import { createServer as createViteServer } from "vite";
 import { MongoClient, Db } from "mongodb";
 
-interface Record {
+interface RiskRecord {
   id: string;
   title: string;
   entity_type: string;
@@ -44,43 +44,161 @@ interface AccessLog {
   timestamp: string;
 }
 
-let db: Db;
-let mongoClient: MongoClient;
+let db: { collection: <T = any>(name: string) => any };
+let mongoClient: MongoClient | null = null;
+
+/**
+ * Simple in-memory fallback for MongoDB when MONGODB_URI is missing.
+ */
+class InMemoryCollection {
+  private data: any[] = [];
+  private name: string;
+
+  constructor(name: string) {
+    this.name = name;
+  }
+
+  async countDocuments() {
+    return this.data.length;
+  }
+
+  async insertMany(docs: any[]) {
+    this.data.push(...docs);
+    return { insertedCount: docs.length };
+  }
+
+  async insertOne(doc: any) {
+    this.data.push(doc);
+    return { insertedId: doc.id || doc._id };
+  }
+
+  async findOne(filter: any) {
+    return this.data.find(item => {
+      for (const key in filter) {
+        if (item[key] !== filter[key]) return false;
+      }
+      return true;
+    });
+  }
+
+  find(filter: any = {}) {
+    let results = this.data.filter(item => {
+      for (const key in filter) {
+        if (filter[key] && typeof filter[key] === 'object' && filter[key].$in) {
+          const values = filter[key].$in;
+          const itemValue = item[key];
+          if (Array.isArray(itemValue)) {
+            if (!itemValue.some(v => values.includes(v))) return false;
+          } else {
+            if (!values.includes(itemValue)) return false;
+          }
+          continue;
+        }
+        if (item[key] !== filter[key]) return false;
+      }
+      return true;
+    });
+
+    const cursor = {
+      results,
+      sort: (sortObj: any) => {
+        const key = Object.keys(sortObj)[0];
+        const dir = sortObj[key];
+        results.sort((a, b) => {
+          if (a[key] < b[key]) return dir === 1 ? -1 : 1;
+          if (a[key] > b[key]) return dir === 1 ? 1 : -1;
+          return 0;
+        });
+        return cursor;
+      },
+      limit: (n: number) => {
+        results = results.slice(0, n);
+        return cursor;
+      },
+      toArray: async () => results
+    };
+
+    return cursor;
+  }
+
+  async replaceOne(filter: any, doc: any) {
+    const index = this.data.findIndex(item => {
+      for (const key in filter) {
+        if (item[key] !== filter[key]) return false;
+      }
+      return true;
+    });
+    if (index !== -1) {
+      this.data[index] = doc;
+      return { modifiedCount: 1 };
+    }
+    return { modifiedCount: 0 };
+  }
+
+  async deleteOne(filter: any) {
+    const index = this.data.findIndex(item => {
+      for (const key in filter) {
+        if (item[key] !== filter[key]) return false;
+      }
+      return true;
+    });
+    if (index !== -1) {
+      this.data.splice(index, 1);
+      return { deletedCount: 1 };
+    }
+    return { deletedCount: 0 };
+  }
+
+  async createIndex() {
+    // No-op for in-memory
+    return this.name;
+  }
+}
+
+class InMemoryDb {
+  private collections: Record<string, InMemoryCollection> = {};
+
+  collection<T = any>(name: string) {
+    if (!this.collections[name]) {
+      this.collections[name] = new InMemoryCollection(name);
+    }
+    return this.collections[name];
+  }
+}
 
 async function connectDatabase() {
   const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI;
 
   if (!mongoUri) {
-    throw new Error(
-      "MongoDB connection string is missing. Set MONGODB_URI or MONGO_URI in .env"
-    );
+    console.warn("MONGODB_URI is missing. Falling back to IN-MEMORY database.");
+    db = new InMemoryDb();
+    await seedDatabase();
+    return;
   }
 
-  mongoClient = new MongoClient(mongoUri);
-
-  await mongoClient.connect();
-
-  const dbName =
-    process.env.MONGODB_DB ||
-    process.env.MONGO_DB ||
-    "risk2data";
-
-  db = mongoClient.db(dbName);
-
-  console.log(`MongoDB connected: ${dbName}`);
-
-  await seedDatabase();
+  try {
+    mongoClient = new MongoClient(mongoUri);
+    await mongoClient.connect();
+    const dbName = process.env.MONGODB_DB || process.env.MONGO_DB || "risk2data";
+    db = mongoClient.db(dbName);
+    console.log(`MongoDB connected: ${dbName}`);
+    await seedDatabase();
+  } catch (error) {
+    console.error("Failed to connect to MongoDB, falling back to IN-MEMORY database:", error);
+    db = new InMemoryDb();
+    await seedDatabase();
+  }
 }
 
 async function seedDatabase() {
-  const recordsCollection = db.collection<Record>("records");
+  const recordsCollection = db.collection<RiskRecord>("records");
 
   const count = await recordsCollection.countDocuments();
 
   if (count === 0) {
     const now = new Date().toISOString();
 
-    const initialRecords: Record[] = [
+    const initialRecords: RiskRecord[] = [
       {
         id: "R2D-001",
         title: "Dar al-Ifta",
@@ -119,7 +237,7 @@ async function seedDatabase() {
     { unique: true }
   );
 
-  await db.collection<Record>("records").createIndex(
+  await db.collection<RiskRecord>("records").createIndex(
     { id: 1 },
     { unique: true }
   );
@@ -127,7 +245,7 @@ async function seedDatabase() {
 
 async function startServer() {
   const app = express();
-  const PORT = Number(process.env.PORT) || 3000;
+  const PORT = 3000;
 
   app.use(express.json());
 
@@ -298,7 +416,7 @@ async function startServer() {
       }
 
       const recordsCollection =
-        db.collection<Record>("records");
+        db.collection<RiskRecord>("records");
 
       const filtered = await recordsCollection
         .find({
@@ -352,7 +470,7 @@ async function startServer() {
     try {
       const records =
         await db
-          .collection<Record>("records")
+          .collection<RiskRecord>("records")
           .find({})
           .sort({ updated_at: -1 })
           .toArray();
@@ -380,7 +498,7 @@ async function startServer() {
     try {
       const latestRecord =
         await db
-          .collection<Record>("records")
+          .collection<RiskRecord>("records")
           .find({})
           .sort({ updated_at: -1 })
           .limit(1)
@@ -388,7 +506,7 @@ async function startServer() {
 
       const totalRecords =
         await db
-          .collection<Record>("records")
+          .collection<RiskRecord>("records")
           .countDocuments();
 
       res.json({
@@ -463,7 +581,7 @@ async function startServer() {
     try {
       const records =
         await db
-          .collection<Record>("records")
+          .collection<RiskRecord>("records")
           .find({})
           .sort({ updated_at: -1 })
           .toArray();
@@ -501,7 +619,7 @@ async function startServer() {
       const now =
         new Date().toISOString();
 
-      const newRecord: Record = {
+      const newRecord: RiskRecord = {
         id: `R2D-${Math.floor(
           1000 + Math.random() * 9000
         )}`,
@@ -545,7 +663,7 @@ async function startServer() {
       };
 
       await db
-        .collection<Record>("records")
+        .collection<RiskRecord>("records")
         .insertOne(newRecord);
 
       res.status(201).json(newRecord);
@@ -581,7 +699,7 @@ async function startServer() {
       } = req.body;
 
       const recordsCollection =
-        db.collection<Record>("records");
+        db.collection<RiskRecord>("records");
 
       const existing =
         await recordsCollection.findOne({ id });
@@ -592,7 +710,7 @@ async function startServer() {
         });
       }
 
-      const updatedRecord: Record = {
+      const updatedRecord: RiskRecord = {
         ...existing,
 
         title:
@@ -674,7 +792,7 @@ async function startServer() {
 
       const result =
         await db
-          .collection<Record>("records")
+          .collection<RiskRecord>("records")
           .deleteOne({ id });
 
       if (result.deletedCount === 0) {
